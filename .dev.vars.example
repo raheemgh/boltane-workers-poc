@@ -1,0 +1,8 @@
+# Copy this file to .dev.vars (no extension change needed beyond dropping
+# ".example") and fill in real values. .dev.vars is for LOCAL DEV ONLY --
+# make sure it's in .gitignore and never committed.
+
+OPENROUTER_API_KEY=sk-or-v1-REPLACE_ME
+SUPABASE_URL=https://REPLACE_ME.supabase.co
+SUPABASE_KEY=REPLACE_ME_SERVICE_ROLE_OR_ANON_KEY
+SUPABASE_TEST_TABLE=stores
