@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Secrets — SUPABASE_SERVICE_ROLE_KEY, OPENROUTER_API_KEY, etc. live in
+# these. NEVER commit them. Local values go in .dev.vars (template:
+# .dev.vars.example); deployed values are Cloudflare secrets (see README's
+# "Deploying" section / secrets.example.json).
+.env
+.env.local
+.env*.local
+
+# Build/test output
+dist/
+coverage/
+*.log
+
+# Cloudflare Workers local dev
+.wrangler/
+.dev.vars
+
+# Stage 7: the file `wrangler secret bulk` uploads, with REAL values in it.
+# (secrets.example.json — the placeholder template — IS committed.)
+secrets.json
+secrets.*.json
+!secrets.example.json
+.env.production

@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    // Both are needed, not redundant: @cloudflare/workers-types alone
+    // declares `Buffer` only as `const Buffer: any` (a value, not a
+    // type) and has no module declaration for bare "crypto" at all —
+    // so lib/malwareScan.ts's `Buffer`-typed params and lib/otpCode.ts's
+    // `import { randomInt } from "crypto"` fail to type-check without
+    // @types/node alongside it. Verified empirically: this combination
+    // type-checks the real Ava lib files with zero errors, and a direct
+    // test (Cloudflare's own `Request.cf` property) confirmed
+    // Workers-specific globals aren't being shadowed by Node's types.
+    "types": ["@cloudflare/workers-types", "@types/node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"]
+}

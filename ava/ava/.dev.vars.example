@@ -1,0 +1,83 @@
+# Local development values for `npm run dev` (wrangler dev).
+# Copy to .dev.vars (gitignored) and fill in:   cp .dev.vars.example .dev.vars
+# This file is for LOCAL use only — deployed values are Cloudflare secrets,
+# set from secrets.json (see secrets.example.json / README "Deploying").
+# There is no PORT, OPENROUTER_SOCKS5_PROXY or dotenv anymore.
+
+# Supabase — service role key, server-side only, NEVER exposed to the frontend
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=
+
+# Boltane's shared platform OpenRouter key.
+# Used for: (a) Ava's own onboarding conversation model, and
+#           (b) is_api_free=true stores in the core engine (not this repo).
+OPENROUTER_API_KEY=
+
+# Model Ava herself uses to run the onboarding conversation + extraction.
+# Must support response_format: {type: "json_object"} on OpenRouter.
+AVA_CONVERSATION_MODEL=openai/gpt-4o-mini
+
+# Fallback ai_model written when a BYOK client picks "choose automatically".
+DEFAULT_AUTO_AI_MODEL=openai/gpt-4o-mini
+
+# No ONBOARDING_WALKTHROUGH_URL here anymore — Ava no longer collects
+# phone_number_id or references the Meta Cloud API setup walkthrough at
+# all (see api/chat.ts / lib/systemPrompt.ts). Meta setup, along with
+# the walkthrough content itself, now lives entirely in the site's
+# post-chat form (POST /complete-setup) — that UI is owned by the site
+# team, not this backend.
+# GitHub Pages origin allowed to call this API (CORS)
+ALLOWED_ORIGIN=https://your-org.github.io
+
+# sed.sh API key — used by /upload-pdf to submit PDFs for malware
+# scanning (lib/malwareScan.ts). Replaces VirusTotal entirely:
+# VirusTotal's free tier is scrapped — its ToS bars commercial use and
+# it actively flags cloud-IP traffic (confirmed, do not reintroduce).
+SED_SH_API_KEY=   # optional — unset skips malware scanning (see README)
+
+# Optional — overrides the URL POST /chat sends OpenRouter requests to
+# (default: https://openrouter.ai/api/v1/chat/completions). Unset = call
+# OpenRouter directly, which is what a Worker should do. Kept as a
+# deliberate escape hatch (e.g. a gateway in front of OpenRouter).
+# OPENROUTER_SOCKS5_PROXY no longer exists (Workers needs no proxy).
+OPENROUTER_API_BASE=
+
+# Max accepted PDF size in bytes. Default 10MB — not from a written
+# spec, adjust if you have an actual number in mind.
+MAX_PDF_SIZE_BYTES=10485760
+
+# No poll-timeout env vars here anymore — /upload-pdf never waits on a
+# scan verdict inside the request at all (see lib/malwareScan.ts /
+# lib/pdfScanSweep.ts). It hands the file to sed.sh and responds 202
+# immediately; the verdict is resolved later by the cron sweep
+# (GET /cron/sweep-pdf-scans, see README), well outside any single
+# function's execution budget.
+
+# Supabase Storage bucket for uploaded signup PDFs (private — see
+# pdf_storage_bucket.sql).
+SUPABASE_PDF_BUCKET=signup-pdfs
+
+# --- Manual OTP handoff (see README's "OTP verification" section) ---
+
+# Raheem's own WhatsApp number. Ava tells clients to text their
+# 12-digit code to this number as a normal WhatsApp message; Raheem
+# matches it by eye and flips the row to 'verified_ready' himself.
+# Also reused as the support-contact number shown when a
+# contact_number duplicate-registration attempt is blocked (see
+# README's "Duplicate registration" section) — deliberately not a
+# separate env var, since it's the same "one human to reach" contact
+# point either way.
+RAHEEM_WHATSAPP_NUMBER=
+
+# Resend (https://resend.com) — fires a notification email to Raheem
+# right after a code is generated, so he doesn't have to watch
+# Supabase live to know a new signup is waiting.
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=onboarding@your-domain.example
+RAHEEM_NOTIFY_EMAIL=
+
+# Shared secret for the two MANUAL cron routes — GET /cron/activate-pending
+# and GET /cron/sweep-pdf-scans (run-it-now / ops fallback). The real
+# schedule is Cloudflare Cron Triggers (scheduled()), which needs no secret.
+# Both routes fail closed (401) if this is unset.
+CRON_SECRET=

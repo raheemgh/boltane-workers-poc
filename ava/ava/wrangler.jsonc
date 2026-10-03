@@ -1,0 +1,43 @@
+{
+  "name": "ava-onboarding-backend",
+  "main": "src/index.ts",
+  // Keep this at or after the day you actually deploy. A recent date is
+  // what makes process.env / Buffer / node:crypto / native WebSocket /
+  // Request.formData() all work with zero extra compatibility_flags —
+  // confirmed locally with a negative control (an older date genuinely
+  // fails to build the same code). See ../ava-migration-plan/00-overview.md.
+  "compatibility_date": "2026-09-28",
+
+  "observability": { "enabled": true },
+
+  // Stage 3: one SetupLock per contact_number guards POST /complete-setup
+  // against double-submit. new_sqlite_classes = the SQLite storage
+  // backend (the only one on the Workers Free plan). Never rename or
+  // delete this class without a new migration entry.
+  "durable_objects": { "bindings": [{ "name": "LOCK", "class_name": "SetupLock" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SetupLock"] }],
+
+  // Stage 6: Cloudflare Cron Triggers (UTC). These two strings must equal
+  // CRON_ACTIVATE_PENDING / CRON_SWEEP_PDF_SCANS in src/cron.ts (a test
+  // enforces it). The Free plan allows 5 Cron Triggers per ACCOUNT (not
+  // per Worker) — this Worker uses 2, so other Workers on the account
+  // share the remaining 3.
+  "triggers": { "crons": ["*/15 * * * *", "*/20 * * * *"] },
+
+  // Stage 7: plain env vars — ONLY the non-personal ones, set to the same
+  // values the code already defaults to, so deploying this changes no
+  // behavior. Everything else is a secret, never written into this file
+  // or into git: the credentials AND the values specific to Raheem
+  // (ALLOWED_ORIGIN, SUPABASE_URL, RAHEEM_NOTIFY_EMAIL,
+  // RAHEEM_WHATSAPP_NUMBER, RESEND_FROM_EMAIL). See secrets.example.json
+  // and the README's "Deploying" section. `wrangler dev` reads .dev.vars,
+  // which overrides these locally.
+  // SED_SH_API_KEY and OPENROUTER_API_BASE are optional: left unset, PDF
+  // malware scanning is skipped / OpenRouter is called directly.
+  "vars": {
+    "AVA_CONVERSATION_MODEL": "openai/gpt-4o-mini",
+    "DEFAULT_AUTO_AI_MODEL": "openai/gpt-4o-mini",
+    "MAX_PDF_SIZE_BYTES": "10485760",
+    "SUPABASE_PDF_BUCKET": "signup-pdfs"
+  }
+}
