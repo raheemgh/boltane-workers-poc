@@ -1,0 +1,12 @@
+# Copy this file to .dev.vars and fill in real values for local
+# `pywrangler dev` runs. Never commit the real .dev.vars file — only
+# this example. Same five values as env.example.txt (the Render
+# build's template); this is Workers' own, unrelated local-dev
+# mechanism for populating `env` (see app/config.py's docstring) —
+# NOT python-dotenv, and not read by anything at deploy time.
+
+META_VERIFY_TOKEN=replace-with-a-long-random-string
+META_APP_SECRET=replace-with-the-meta-app-secret-from-the-app-dashboard
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=replace-with-your-supabase-service-key
+OPENROUTER_DEFAULT_KEY=replace-with-the-shared-platform-openrouter-key

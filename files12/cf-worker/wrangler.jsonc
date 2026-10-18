@@ -1,0 +1,9 @@
+{
+	"name": "boltane-core-engine",
+	"main": "src/entry.py",
+	// Cloudflare's docs say to set this to today's date. If `pywrangler dev`
+	// prints "falling back to <date>" because your local workerd is a few
+	// days older, just use the date it suggests.
+	"compatibility_date": "2026-09-28",
+	"compatibility_flags": ["python_workers"]
+}

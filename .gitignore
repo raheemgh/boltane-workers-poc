@@ -1,1 +1,10 @@
 .dev.vars
+
+# Boltane migration: secrets, generated outputs, Render comparison copy
+files12/cf-worker/.dev.vars*
+!files12/cf-worker/.dev.vars.example
+files12/cf-worker/stage*_*.json
+files12/cf-worker/stage4_report.txt
+files12/cf-worker/*.zip
+files12/*.zip
+files12/app/

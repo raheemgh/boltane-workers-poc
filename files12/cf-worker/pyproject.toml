@@ -1,0 +1,23 @@
+[project]
+name = "boltane-core-engine-workers"
+version = "0.1.0"
+description = "Boltane Core Engine — Cloudflare Python Workers build (Render version lives in the repo root and is untouched)"
+requires-python = ">=3.13"
+# Runtime deps only — these get vendored into python_modules/ by pywrangler.
+# Dropped vs the Render requirements.txt on purpose:
+#   uvicorn[standard]  Workers replaces the ASGI server entirely
+#   httpx[socks]       the [socks] extra: SOCKS5 doesn't work over Workers' fetch-based transport
+#   python-dotenv      no .env file on Workers
+#   pydantic-settings  belongs to Stage 1 (config.py), not added yet
+dependencies = [
+    "fastapi>=0.115.0",
+    "httpx>=0.27.0",
+    "supabase>=2.9.0",
+]
+
+[dependency-groups]
+# Local tooling only — `workers` itself is provided by the Workers runtime.
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+]
