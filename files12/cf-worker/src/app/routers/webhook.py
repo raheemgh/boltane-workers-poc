@@ -54,6 +54,7 @@ Together these bound the worst case a single customer (or a single
 conversation) can cost, on top of the existing monthly ceiling.
 """
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -71,6 +72,7 @@ from app.services.supabase_client import (
     update_store_usage,
 )
 from app.services.token_limits import MAX_INPUT_TOKENS_PER_MESSAGE, estimate_tokens
+from app.worker_ctx import get_worker_ctx
 
 logger = logging.getLogger("boltane.webhook")
 
@@ -207,7 +209,22 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
     payload = await request.json()
     logger.info("received webhook payload: %s", payload)
 
-    background_tasks.add_task(_process_message, payload)
+    # Stage 6 — the one deliberate difference from Render's receive_message.
+    # On Workers the pipeline is handed to ctx.waitUntil(): the 200 goes out at once and the work keeps running
+    # for up to ~30 s after it (measured on a deployed probe: 28 s finished, 35 s was cancelled). FastAPI's
+    # BackgroundTasks would instead hold the response until the whole pipeline ended (5.7 s / 40.9 s / 70.0 s
+    # measured for tasks of 5 / 40 / 70 s). Outside a Worker (offline tests) there is no ctx and the original
+    # BackgroundTasks path is used unchanged.
+    ctx = get_worker_ctx(request.scope)
+    if ctx is not None:
+        task = asyncio.ensure_future(_process_message(payload))
+        try:
+            ctx.waitUntil(task)
+        except Exception:
+            # The task is already running; it just is not protected from cancellation once the response ends.
+            logger.exception("ctx.waitUntil failed — the pipeline may be cancelled when the response ends")
+    else:
+        background_tasks.add_task(_process_message, payload)
 
     return {"status": "received"}
 

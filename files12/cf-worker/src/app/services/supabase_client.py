@@ -54,21 +54,26 @@ import time. Reasoning:
     message), but it shares nothing across requests by construction.
     Both modes are covered by the unit tests.
 
+Stage 6 dependency change (bundle size): this file no longer imports the
+`supabase` umbrella package. It builds the PostgREST client directly (see
+`acreate_client` below). Behaviour, signatures and queries are unchanged.
+It was first made against a 3 MB compressed bundle limit that Cloudflare's docs
+no longer have (the Free limit is now 64 MiB uncompressed); it is kept because
+it removes about 8.5 MB of packages never used here and lowers startup work.
+
 `_client` is also the injection point the existing tests use
 (`sc._client = fake`); it is honoured in both modes.
 """
 
 import asyncio
+import warnings
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
 
-from supabase import acreate_client
+from postgrest import AsyncPostgrestClient
+from postgrest.constants import DEFAULT_POSTGREST_CLIENT_TIMEOUT
 
 from app.config import get_settings
 from app.services.token_limits import CONVERSATION_TOKEN_CAP
-
-if TYPE_CHECKING:
-    from supabase import AsyncClient
 
 # Boltane's own definition of a "conversation": messages from the same
 # customer to the same store within a rolling window count as one
@@ -84,16 +89,43 @@ CONVERSATION_WINDOW_HOURS = 2
 # See "Client lifetime" in the module docstring before changing this.
 CACHE_CLIENT_ACROSS_CALLS = True
 
-_client: "AsyncClient | None" = None
+_client: AsyncPostgrestClient | None = None
 _init_lock: asyncio.Lock | None = None
 
 
-async def _new_client() -> "AsyncClient":
+async def acreate_client(url: str, key: str) -> AsyncPostgrestClient:
+    """
+    Builds the PostgREST client for the project at `url` with `key`.
+
+    Stage 6 replacement for the `acreate_client` that the `supabase` umbrella
+    package provides. That package also pulls in auth, storage, realtime and
+    functions clients this service never calls; one of them (auth) drags in
+    `cryptography` (about 8 MB uncompressed with its helpers), which alone
+    was roughly 40% of the vendored bundle.
+
+    The call below is the one the umbrella package makes internally, rebuilt
+    by hand: base URL `<url>/rest/v1`, the `apikey` and `Authorization:
+    Bearer` headers it adds, schema "public", and the same default timeout
+    constant. The query-builder API (`.table().select().eq()...execute()`)
+    and the error class (`postgrest.APIError`) are the same objects as before.
+    The deprecation notice the library prints for an explicit `timeout=` is
+    silenced because passing it is exactly what keeps the old behaviour.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return AsyncPostgrestClient(
+            f"{url.rstrip('/')}/rest/v1",
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+            timeout=DEFAULT_POSTGREST_CLIENT_TIMEOUT,
+        )
+
+
+async def _new_client() -> AsyncPostgrestClient:
     settings = get_settings()
     return await acreate_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
 
-async def _get_client() -> "AsyncClient":
+async def _get_client() -> AsyncPostgrestClient:
     """
     Returns the client to use for one query, per the lifetime policy in
     the module docstring. A failure to build it (e.g. get_settings()

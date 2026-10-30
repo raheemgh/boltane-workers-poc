@@ -4,24 +4,31 @@ Boltane Core Engine — FastAPI application entry point
 
 The always-on message handler for Boltane's free-tier multi-tenant
 WhatsApp bot:
-    - GET  /webhook   Meta webhook verification          (Stage 6 — not wired yet)
-    - POST /webhook   incoming WhatsApp message handling (Stage 6 — not wired yet)
+    - GET  /webhook   Meta webhook verification
+    - POST /webhook   incoming WhatsApp message handling
     - GET  /health    keep-alive endpoint (no Supabase/AI calls)
 
 Differences from the Render version's app/main.py, and only these:
-  1. Workers has no ASGI server process — `Default = asgi.entrypoint(app)`
-     at the bottom is what the Workers runtime picks up (via src/entry.py).
-  2. The webhook router is NOT included yet: app/routers/webhook.py and
-     everything it depends on (config, supabase_client, meta_client,
-     ai_client) belong to later migration stages. Stage 6 adds back
-     `from app.routers import webhook` and
-     `app.include_router(webhook.router)`.
+  1. Workers has no ASGI server process. The runtime picks up the class `Default`
+     (via src/entry.py).
+  2. (Stage 6) `Default` is written out instead of `Default = asgi.entrypoint(app)`,
+     because the webhook needs the request's `ctx` to call ctx.waitUntil() and the
+     ready-made entrypoint does not hand it to the app. See app/worker_ctx.py for the
+     measurements behind this. Routing is unchanged: asgi.fetch() still serves `app`.
+
+Stage 6: the webhook router is wired in, and the four temporary
+diagnostic routers from Stages 1-4 (debug_settings, debug_supabase,
+debug_meta, debug_ai) are no longer imported or included here, so none
+of their /debug/* routes exist on the deployed Worker. (The debug_*.py
+files themselves are left on disk for now — several earlier test files
+load them by path; see stage6-runbook.md.)
 """
 
 from fastapi import FastAPI
-from workers import asgi
+from workers import WorkerEntrypoint, asgi
 
-from app.routers import debug_ai, debug_meta, debug_settings, debug_supabase, health
+from app.routers import health, webhook
+from app.worker_ctx import EnvWithCtx
 
 app = FastAPI(
     title="Boltane Core Engine",
@@ -29,23 +36,10 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Stage 6: app.include_router(webhook.router)
+app.include_router(webhook.router)
 app.include_router(health.router)
-# Stage 1 diagnostic only — see app/routers/debug_settings.py's
-# docstring. Remove this line (and that file) once Stage 1 is
-# confirmed working, well before anything here is ever deployed.
-app.include_router(debug_settings.router)
-# Stage 3 diagnostic only — see app/routers/debug_meta.py's docstring.
-# Inert unless STAGE3_DEBUG_ENABLED=1 is set in .dev.vars. Remove this
-# line (and that file) once Stage 3 is confirmed, before Stage 6.
-app.include_router(debug_meta.router)
-# Stage 2 diagnostic only — see app/routers/debug_supabase.py's docstring.
-# Inert unless STAGE2_DEBUG_ENABLED=1 AND STAGE2_CONFIRM_TEST_PROJECT equals
-# SUPABASE_URL. Remove this line (and that file) before Stage 6.
-app.include_router(debug_supabase.router)
-# Stage 4 diagnostic only — see app/routers/debug_ai.py's docstring.
-# Inert unless STAGE4_DEBUG_ENABLED=1 is set in .dev.vars. Remove this
-# line (and that file) once Stage 4 is confirmed, before Stage 6.
-app.include_router(debug_ai.router)
 
-Default = asgi.entrypoint(app)
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        return await asgi.fetch(app, request, EnvWithCtx(self.env, getattr(self, "ctx", None)))

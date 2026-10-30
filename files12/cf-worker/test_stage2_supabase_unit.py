@@ -108,7 +108,9 @@ def t_static() -> None:
     sync_factory = re.search(r"(?<![A-Za-z_])create_client\(", source)  # `acreate_client(` must not match
     check("1 static: no thread-offloading anywhere in the file (and no sync create_client)",
           not found and not sync_factory, str(found or sync_factory))
-    check("1 static: acreate_client is what gets imported", "from supabase import acreate_client" in source)
+    check("1 static: the PostgREST-only client is what gets built (the `supabase` umbrella package is not imported)",
+          "from postgrest import AsyncPostgrestClient" in source
+          and not re.search(r"^\s*(?:from|import)\s+supabase\b", source, re.MULTILINE))
 
     if not RENDER_SC_PATH.exists():
         check("1 static: signatures identical to the Render original", False, f"{RENDER_SC_PATH} not found")

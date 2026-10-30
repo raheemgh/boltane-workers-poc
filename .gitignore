@@ -8,3 +8,7 @@ files12/cf-worker/stage4_report.txt
 files12/cf-worker/*.zip
 files12/*.zip
 files12/app/
+.wrangler/
+files12/cf-probe/
+files12/cf-worker/knowledge_upload/
+files12/cf-worker/knowledge_hashes.sha256
