@@ -1,0 +1,30 @@
+# Install once, from the repo root:
+#   pip install pre-commit ruff
+#   pre-commit install -c files12/cf-worker/.pre-commit-config.yaml --hook-type pre-commit --hook-type commit-msg
+# Hooks are local and use the tools already on PATH; nothing is downloaded.
+repos:
+  - repo: local
+    hooks:
+      - id: conventions-docs
+        name: regenerate docs/INDEX.md and docs/KNOWLEDGE_MAP.md
+        entry: bash -c 'cd files12/cf-worker && python3 tooling/conventions/check_conventions.py --write-docs --quiet'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: conventions-check
+        name: V2 conventions checker
+        entry: bash -c 'cd files12/cf-worker && python3 tooling/conventions/check_conventions.py'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: ruff
+        name: ruff
+        entry: bash -c 'cd files12/cf-worker && ruff check .'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: commit-message
+        name: commit message starts with V2-xx
+        entry: python3 files12/cf-worker/tooling/conventions/check_conventions.py --commit-msg
+        language: system
+        stages: [commit-msg]

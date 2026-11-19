@@ -1,0 +1,29 @@
+# Offline checks for cf-worker: conventions checker, the kit's own tests, ruff.
+# V2-09 extends this workflow with the offline regression suites.
+name: cf-worker conventions
+
+on:
+  push:
+    paths: ["files12/cf-worker/**", ".github/workflows/cf-worker-conventions.yml"]
+  pull_request:
+    paths: ["files12/cf-worker/**", ".github/workflows/cf-worker-conventions.yml"]
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: "files12/cf-worker"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Conventions checker
+        run: python3 tooling/conventions/check_conventions.py
+      - name: Kit tests (conventions)
+        run: PYTHONPATH=tooling/conventions python3 -m unittest discover -s tests/v2/conventions -v
+      - name: Kit tests (installers)
+        run: PYTHONPATH=tooling/installers python3 -m unittest discover -s tests/v2/installers -v
+      - name: Ruff
+        run: pip install ruff && ruff check .

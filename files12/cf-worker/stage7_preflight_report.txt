@@ -1,0 +1,101 @@
+Stage 7 preflight (read-only) — 2026-10-31 22:09:15
+
+======================================================================
+1) Python and packages
+======================================================================
+python: 3.14.2   executable: /home/codespace/venv-tests/bin/python
+venv active: yes
+  fastapi    importable
+  httpx      importable
+  postgrest  importable
+  pydantic   importable
+  uv         uv 0.13.5 (x86_64-unknown-linux-gnu)
+
+======================================================================
+2) Git
+======================================================================
+repo root: /workspaces/boltane-workers-poc
+cf-worker: /workspaces/boltane-workers-poc/files12/cf-worker
+branch:
+  workers-stage7
+last 3 commits:
+  75c4474 Stage 6: schedule webhook pipeline with ctx.waitUntil; routes, deployed and meta-sim tests
+  32d393a Workers migration stages 0-5: config, async supabase client, ai/meta clients, PII masking v2, firewall integration tests
+  4f7f189 Stage 4: port ai_client.py to Workers (+ tests, debug route)
+unpushed vs upstream:
+  75c4474 Stage 6: schedule webhook pipeline with ctx.waitUntil; routes, deployed and meta-sim tests
+git status --short: 22 line(s) (first 20)
+  ?? ava/ava-backend-stage7.zip
+  ?? ava/ava-stage7.patch
+  ?? files12/cf-worker/cfw_routers_debug_ai.py
+  ?? files12/cf-worker/cfw_test_stage6_deployed.py
+  ?? files12/cf-worker/cfw_test_stage6_routes.py
+  ?? files12/cf-worker/collect_knowledge_files.sh
+  ?? files12/cf-worker/install_probe.py
+  ?? files12/cf-worker/install_probe2.py
+  ?? files12/cf-worker/install_stage6.py
+  ?? files12/cf-worker/install_stage6b.py
+  ?? files12/cf-worker/install_stage6c.py
+  ?? files12/cf-worker/install_stage6d.py
+  ?? files12/cf-worker/install_stage6e.py
+  ?? files12/cf-worker/push_stage6_secrets.py
+  ?? files12/cf-worker/pylock.toml
+  ?? files12/cf-worker/stage7_preflight.py
+  ?? files12/cf-worker/uv.lock
+  ?? files12/stores_table.sql
+  ?? poetry.lock
+  ?? pylock.toml
+stray download copy src/app/cfw_main.py: not present
+
+======================================================================
+3) The three original test files
+======================================================================
+test_package_system.py: NOT FOUND anywhere under /workspaces/boltane-workers-poc (skipped: .git, .uv-cache, .venv, .wrangler, __pycache__, cf-probe, knowledge_upload, node_modules, python_modules, venv)
+test_usage_protection.py: NOT FOUND anywhere under /workspaces/boltane-workers-poc (skipped: .git, .uv-cache, .venv, .wrangler, __pycache__, cf-probe, knowledge_upload, node_modules, python_modules, venv)
+test_webhook_timing.py: NOT FOUND anywhere under /workspaces/boltane-workers-poc (skipped: .git, .uv-cache, .venv, .wrangler, __pycache__, cf-probe, knowledge_upload, node_modules, python_modules, venv)
+
+files the parity / timing steps reuse:
+  present  app/routers/webhook.py
+  present  app/services/ai_client.py
+  present  cf-worker/src/app/worker_ctx.py
+  present  cf-worker/test_stage4_offline.py
+  present  cf-worker/test_stage4_real.py
+  present  cf-worker/test_stage5_firewall.py
+  present  cf-worker/test_stage6_routes.py
+  present  cf-worker/test_stage6_deployed.py
+  present  cf-worker/test_stage6_meta_sim.py
+  present  cf-worker/tooling/local-test-support/workers.py
+  present  cf-worker/tooling/local-test-support/memory_supabase.py
+
+======================================================================
+4) Baseline: the ORIGINAL tests, unmodified, one function at a time, on the Workers tree
+======================================================================
+no folder contains BOTH test_package_system.py and test_usage_protection.py — baseline not run
+
+======================================================================
+5) .dev.vars and environment (names only, no values)
+======================================================================
+.dev.vars: exists at /workspaces/boltane-workers-poc/files12/cf-worker/.dev.vars
+keys in .dev.vars: META_APP_SECRET, META_TEST_PHONE_NUMBER_ID, META_TEST_RECIPIENT, META_VERIFY_TOKEN, OPENROUTER_DEFAULT_KEY, STAGE4_DEBUG_ENABLED, SUPABASE_KEY, SUPABASE_URL
+  META_VERIFY_TOKEN            .dev.vars
+  META_APP_SECRET              .dev.vars
+  SUPABASE_URL                 .dev.vars
+  SUPABASE_KEY                 .dev.vars
+  OPENROUTER_DEFAULT_KEY       .dev.vars
+  META_TEST_PHONE_NUMBER_ID    .dev.vars
+  META_TEST_RECIPIENT          .dev.vars
+  WORKER_URL                   MISSING
+
+======================================================================
+6) Test store row in Supabase (read-only select)
+======================================================================
+NO row with phone_number_id=stage6-test-pn (deleted or never created) — `deliver` cannot run until it is recreated
+
+======================================================================
+7) Deployed Worker /health (3 calls, 1 s apart)
+======================================================================
+url: https://boltane-core-engine.boltane.workers.dev
+  #1: HTTP 200  1.55s  '{"status":"ok"}'
+  #2: HTTP 200  0.88s  '{"status":"ok"}'
+  #3: HTTP 200  1.00s  '{"status":"ok"}'
+(HTTP 0 right away = URL without the full domain; see the handoff notes)

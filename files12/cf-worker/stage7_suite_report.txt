@@ -1,0 +1,68 @@
+Stage 7 suite — 2026-11-01 15:48:41
+python 3.14.2  cwd /workspaces/boltane-workers-poc/files12/cf-worker
+
+========================================================================
+Part 0) Application code untouched (git)
+========================================================================
+  PASS  tracked files under files12/cf-worker/src/ identical to HEAD
+  PASS  no untracked/stray files under files12/cf-worker/src/
+  HEAD: 75c4474 Stage 6: schedule webhook pipeline with ctx.waitUntil; routes, deployed and meta-sim tests
+
+========================================================================
+Part 1) Adapted tests on the Workers tree, one function at a time
+========================================================================
+test_package_system.py
+  PASS        test_low_tier_branding_and_free_models
+  PASS        test_basic_and_pro_no_branding_deepseek
+  PASS        test_byok_never_capped_regardless_of_package
+  PASS        test_conversation_window_layer
+  PASS        test_webhook_only_counts_new_conversations
+  => 5/5 passed
+test_usage_protection.py
+  PASS        test_oversized_input_message_is_rejected_before_calling_ai
+  PASS        test_normal_sized_message_is_not_rejected
+  PASS        test_every_openrouter_call_sets_max_output_tokens
+  PASS        test_supabase_layer_forces_reset_when_token_cap_reached
+  PASS        test_webhook_counts_token_cap_reset_against_monthly_cap
+  PASS        test_resolve_monthly_conversation_cap_is_trial_branching
+  PASS        test_webhook_enforces_trial_basic_cap_at_100
+  PASS        test_webhook_enforces_paid_basic_cap_at_300
+  => 8/8 passed
+
+========================================================================
+Part 2) Baseline: the same files with the single changed line put back
+========================================================================
+test_package_system.py (BEFORE)
+  PASS        test_low_tier_branding_and_free_models
+  PASS        test_basic_and_pro_no_branding_deepseek
+  PASS        test_byok_never_capped_regardless_of_package
+  FAIL        test_conversation_window_layer   -> TypeError: 'types.SimpleNamespace' object can't be awaited
+  PASS        test_webhook_only_counts_new_conversations
+  => 4/5 passed
+test_usage_protection.py (BEFORE)
+  PASS        test_oversized_input_message_is_rejected_before_calling_ai
+  PASS        test_normal_sized_message_is_not_rejected
+  PASS        test_every_openrouter_call_sets_max_output_tokens
+  FAIL        test_supabase_layer_forces_reset_when_token_cap_reached   -> TypeError: 'types.SimpleNamespace' object can't be awaited
+  PASS        test_webhook_counts_token_cap_reset_against_monthly_cap
+  PASS        test_resolve_monthly_conversation_cap_is_trial_branching
+  PASS        test_webhook_enforces_trial_basic_cap_at_100
+  PASS        test_webhook_enforces_paid_basic_cap_at_300
+  => 7/8 passed
+
+Tests whose verdict differs between BEFORE and the adapted run:
+  test_package_system.test_conversation_window_layer: FAIL -> PASS
+  test_usage_protection.test_supabase_layer_forces_reset_when_token_cap_reached: FAIL -> PASS
+
+========================================================================
+Part 3) Earlier offline tests (summary line of each; exit code 0 = passed)
+========================================================================
+  test_stage0_ports.py               exit 0  ALL PASS   (0s)
+  test_pii_masking_general.py        exit 0  29/29 checks passed   (4s)
+  test_stage1_settings.py            exit 0  ALL PASS   (0s)
+  test_stage2_supabase_unit.py       exit 0  41/41 checks passed   (0s)
+  test_stage3_offline.py             exit 0  52/52 checks passed   (0s)
+  test_stage4_offline.py             exit 0  ALL PASS   (0s)
+  test_stage5_firewall.py            exit 0  29/29 checks passed   (1s)   [recorded: 29/29]
+  test_stage6_routes.py              exit 0  36/36 checks passed   (1s)   [recorded: 36 checks]
+  test_stage6_meta_sim.py            exit 0  54 scenarios: 23 PASS, 31 GAP, 0 FAIL   (1s)   [recorded: 23 PASS / 31 GAP / 0 FAIL]

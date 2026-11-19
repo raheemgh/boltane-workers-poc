@@ -1,0 +1,22 @@
+# Lint config for V2 code only. V1 files and the legacy flat tests are not linted.
+# Run from this folder: ruff check .
+line-length = 100
+target-version = "py312"
+include = [
+    "src/app/v2/**/*.py",
+    "tests/v2/**/*.py",
+    "tooling/conventions/**/*.py",
+    "tooling/installers/**/*.py",
+]
+
+[lint]
+select = ["E", "F", "W", "B", "N", "C90", "T20", "PLR0913"]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-args = 6
+
+[lint.per-file-ignores]
+"tooling/**" = ["T20"]
