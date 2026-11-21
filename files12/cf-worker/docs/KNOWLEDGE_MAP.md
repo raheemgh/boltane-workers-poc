@@ -4,10 +4,21 @@
 
 | الاسم المسطّح | المسار (تحت cf-worker/) | sha256 |
 |---|---|---|
+| 00-file-map.md | docs/00-file-map.md | b96f7010c8fc |
 | AGENTS.md | AGENTS.md | b4bd86b2cb50 |
 | ARCHITECTURE.md | docs/ARCHITECTURE.md | acee29305533 |
-| INDEX.md | docs/INDEX.md | 4024be62ac73 |
+| INDEX.md | docs/INDEX.md | 177179990f52 |
 | V2-00B.md | docs/stages/V2-00B.md | 6b60b454bcc0 |
+| V2-01.md | docs/stages/V2-01.md | 382ee1325ad6 |
+| adr-0001-strangler.md | docs/adr/adr-0001-strangler.md | 315fad822395 |
+| adr-0002-flags.md | docs/adr/adr-0002-flags.md | e84864f12686 |
+| adr-0003-database.md | docs/adr/adr-0003-database.md | 6e8ddb85c192 |
+| adr-0004-testability.md | docs/adr/adr-0004-testability.md | 8cf4362b8295 |
+| adr-0005-free-plan-budgets.md | docs/adr/adr-0005-free-plan-budgets.md | 9e91ba61fa11 |
+| adr-0006-bsuid-identity.md | docs/adr/adr-0006-bsuid-identity.md | e447ca8e4807 |
+| adr-0007-arabic-default.md | docs/adr/adr-0007-arabic-default.md | 33371dec9712 |
+| adr-0008-ordering-and-timeouts.md | docs/adr/adr-0008-ordering-and-timeouts.md | 73c6d7b9239e |
+| adr-0009-no-import-time-effects.md | docs/adr/adr-0009-no-import-time-effects.md | 3064111c48b1 |
 | cfw_config.py | src/app/config.py | d6629860062c |
 | cfw_entry.py | src/entry.py | d2f7b6f72b56 |
 | cfw_main.py | src/app/main.py | 0a885649a8e9 |
@@ -23,8 +34,15 @@
 | test_v2_conventions__check_conventions.py | tests/v2/conventions/test_check_conventions.py | d10790c99c79 |
 | test_v2_conventions__conv_docs.py | tests/v2/conventions/test_conv_docs.py | 7b135944bd35 |
 | test_v2_conventions__conv_rules.py | tests/v2/conventions/test_conv_rules.py | f83a22f42479 |
+| test_v2_core__errors.py | tests/v2/core/test_errors.py | 9910a8901124 |
+| test_v2_core__flags.py | tests/v2/core/test_flags.py | 19bee3244f77 |
+| test_v2_core__log_schema.py | tests/v2/core/test_log_schema.py | 957e5315c54e |
+| test_v2_core__store_config.py | tests/v2/core/test_store_config.py | 9f6ad2b2bf48 |
 | test_v2_installers__build_installer.py | tests/v2/installers/test_build_installer.py | ded9aad11fca |
+| test_v2_installers__install_v2_01.py | tests/v2/installers/test_install_v2_01.py | 95d0f26f5087 |
 | test_v2_installers__installer_template.py | tests/v2/installers/test_installer_template.py | 48312ef44a1a |
+| test_v2_schema__schema_contract_real.py | tests/v2/schema/test_schema_contract_real.py | c870e44e6890 |
+| test_v2_schema__schema_static.py | tests/v2/schema/test_schema_static.py | 0a2e6692a685 |
 | v2-audit-flaws-and-speed.md | docs/reference/v2-audit-flaws-and-speed.md | 3cb6b626a3bf |
 | v2-ava-brief.md | docs/reference/v2-ava-brief.md | 93610d178dbd |
 | v2-conventions.md | docs/reference/v2-conventions.md | 10a7af423c61 |
@@ -33,6 +51,13 @@
 | v2-plan-specs-and-features.md | docs/reference/v2-plan-specs-and-features.md | 089464e54097 |
 | v2-research-addendum.md | docs/reference/v2-research-addendum.md | 63356ec0a610 |
 | v2-research-notes-and-sources.md | docs/reference/v2-research-notes-and-sources.md | 156d55c3ed76 |
+| v2_contracts__store_config.schema.json | contracts/store_config.schema.json | 7ccf4dcfd059 |
+| v2_core__errors.py | src/app/v2/core/errors.py | d0d5a487eb87 |
+| v2_core__flags.py | src/app/v2/core/flags.py | c433befa5a31 |
+| v2_core__log_schema.py | src/app/v2/core/log_schema.py | 4e44200a66e2 |
+| v2_core__store_config.py | src/app/v2/core/store_config.py | fd56052ad535 |
+| v2_sql__001_core_schema.sql | sql/migrations/001_core_schema.sql | be1afbb2f91f |
+| v2_sql__rollback__001_core_schema.sql | sql/rollbacks/001_core_schema.sql | 427abd98b093 |
 | v2_tooling__build_installer.py | tooling/installers/build_installer.py | d2bb7701aa3d |
 | v2_tooling__check_conventions.py | tooling/conventions/check_conventions.py | ee1e7d44697f |
 | v2_tooling__conv_config.py | tooling/conventions/conv_config.py | 2db2849e6848 |
@@ -47,5 +72,6 @@
 | v2_tooling__conv_rules_content.py | tooling/conventions/conv_rules_content.py | 5eb316ef8fff |
 | v2_tooling__conv_testkit.py | tooling/conventions/conv_testkit.py | 331d3e3a249b |
 | v2_tooling__install_v2_00b.py | tooling/installers/install_v2_00b.py | dbcb7bacf55c |
+| v2_tooling__install_v2_01.py | tooling/installers/install_v2_01.py | f5f903d05b37 |
 | v2_tooling__installer_template.py | tooling/installers/installer_template.py | 6050cd47a3ff |
 | worker_ctx.py | src/app/worker_ctx.py | 9fdcaca95c23 |

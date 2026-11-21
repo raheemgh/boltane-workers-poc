@@ -1,0 +1,1855 @@
+diff --git a/.env.example b/.dev.vars.example
+similarity index 84%
+rename from .env.example
+rename to .dev.vars.example
+index f85d234..8c7ecf9 100644
+--- a/.env.example
++++ b/.dev.vars.example
+@@ -1,3 +1,9 @@
++# Local development values for `npm run dev` (wrangler dev).
++# Copy to .dev.vars (gitignored) and fill in:   cp .dev.vars.example .dev.vars
++# This file is for LOCAL use only — deployed values are Cloudflare secrets,
++# set from secrets.json (see secrets.example.json / README "Deploying").
++# There is no PORT, OPENROUTER_SOCKS5_PROXY or dotenv anymore.
++
+ # Supabase — service role key, server-side only, NEVER exposed to the frontend
+ SUPABASE_URL=https://xxxx.supabase.co
+ SUPABASE_SERVICE_ROLE_KEY=
+@@ -70,8 +76,8 @@ RESEND_API_KEY=
+ RESEND_FROM_EMAIL=onboarding@your-domain.example
+ RAHEEM_NOTIFY_EMAIL=
+ 
+-# Shared secret for both cron endpoints — GET /cron/activate-pending
+-# and GET /cron/sweep-pdf-scans — give the same value to whichever
+-# external scheduler(s) call them. Both endpoints fail closed (401) if
+-# this is unset.
++# Shared secret for the two MANUAL cron routes — GET /cron/activate-pending
++# and GET /cron/sweep-pdf-scans (run-it-now / ops fallback). The real
++# schedule is Cloudflare Cron Triggers (scheduled()), which needs no secret.
++# Both routes fail closed (401) if this is unset.
+ CRON_SECRET=
+diff --git a/.gitignore b/.gitignore
+index 8907ae2..2ada111 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,15 +2,13 @@
+ node_modules/
+ 
+ # Secrets — SUPABASE_SERVICE_ROLE_KEY, OPENROUTER_API_KEY, etc. live in
+-# these. NEVER commit them; set the real values in Vercel's project
+-# settings instead (see README's env var list / .env.example).
++# these. NEVER commit them. Local values go in .dev.vars (template:
++# .dev.vars.example); deployed values are Cloudflare secrets (see README's
++# "Deploying" section / secrets.example.json).
+ .env
+ .env.local
+ .env*.local
+ 
+-# Vercel
+-.vercel
+-
+ # Build/test output
+ dist/
+ coverage/
+@@ -19,3 +17,10 @@ coverage/
+ # Cloudflare Workers local dev
+ .wrangler/
+ .dev.vars
++
++# Stage 7: the file `wrangler secret bulk` uploads, with REAL values in it.
++# (secrets.example.json — the placeholder template — IS committed.)
++secrets.json
++secrets.*.json
++!secrets.example.json
++.env.production
+diff --git a/CHANGES.md b/CHANGES.md
+index abdecb4..6de89fc 100644
+--- a/CHANGES.md
++++ b/CHANGES.md
+@@ -230,3 +230,105 @@ Stage 7.
+   Free also caps subrequests at 50 per invocation; the longest `/chat`
+   path makes about a dozen.
+ - Cross-region Durable Object behavior (Stage 3) is still deploy-only.
++
++# Workers migration — Stages 5, 6 and 7 (branch `workers`)
++
++Result label for everything below: **"passed locally"**. Nothing here has run on
++real Cloudflare yet — see "Not proven yet".
++
++## Stage 5 — `POST /upload-pdf`
++- `api/upload-pdf.ts` is a Hono handler; `busboy` + `lib/multipart.ts` are gone,
++  replaced by `Request.formData()`.
++- The one real behavior difference: busboy cut an oversized upload off *while
++  streaming*; `formData()` buffers the whole body, and a Worker request body can
++  be up to 100 MB against a 128 MB isolate. So the cap is enforced *during* the
++  stream (a `Content-Length` pre-check, plus a byte-counting `TransformStream`
++  for chunked / missing / lying lengths), then the exact `file.size` check, then
++  `validatePdfFile()`'s friendlier 422 — same three outcomes as before.
++- `MAX_PDF_SIZE_BYTES` that isn't a positive number now falls back to the 10 MB
++  default (`parseInt("abc")` was NaN, and every `x > NaN` is false, so a typo
++  silently disabled the cap).
++- `lib/pdfValidation.ts`: `isPdfMagicBytes` compares bytes in a loop instead of
++  `Buffer.prototype.equals`, which loses its type declaration when Cloudflare's
++  and Node's types are loaded together (`tsconfig.workers.json`). Same behavior.
++- The `/upload-pdf` handler had no test before; `tests/uploadPdf.test.ts` covers
++  the whole decision tree (23 tests).
++
++## Stage 6 — cron, `GET /lookup-signup`
++- `scheduled()` (`src/cron.ts`) handles two Cron Triggers: `*/15 * * * *` →
++  activation, `*/20 * * * *` → PDF-scan sweep (UTC; `wrangler.jsonc`
++  `triggers.crons`, a test fails if the two files drift; an unrecognized
++  expression throws instead of silently doing nothing). Each job logs a
++  `[cron] <job> {summary}` line. The default export is now
++  `{ fetch, scheduled }`; `app` is also a named export.
++- The manual `GET /cron/activate-pending` and `/cron/sweep-pdf-scans` stay behind
++  `CRON_SECRET` and call the same `runActivatePending()` / `runSweepPdfScans()`.
++- `isCronAuthorizedRequest()` for Web `Request`s: repeated `?secret=a&secret=b`
++  is rejected (Express gave an array; Hono's `c.req.query()` would return the
++  first value). `lookup-signup` rejects a repeated `contact_number` the same way.
++- Free plan: 5 Cron Triggers per **account**; this Worker uses 2.
++- `lookup-signup`'s privacy property — "no row" and "OTP already sent" return
++  byte-identical responses — is now a test.
++- `src/workersContract.ts` (compile-time only) asserts the default export is a
++  valid `ExportedHandler<Env>` under `tsconfig.workers.json`.
++
++## Stage 7 — integration
++- **Retired for good:** `server.ts`, `lib/asyncHandler.ts`, `lib/cors.ts`,
++  `tsconfig.build.json`, the `/selftest` route, and the dependencies `express`,
++  `dotenv`, `@types/express`, `tsx`. `lib/cronAuth.ts` keeps only the Web-`Request`
++  check. Stage 7's optional step 0 (`crypto.subtle.timingSafeEqual`) was
++  deliberately **not** done: no gain, and the existing Node `timingSafeEqual` is
++  exercised under real workerd by `check:cron`.
++- **A behavior the port had silently dropped, now restored:** `server.ts`'s
++  `express.json({ limit: "4.5mb" })`. `lib/httpBody.ts` now caps JSON bodies at
++  4.5 MB (declared `Content-Length`, then counted while streaming) → `413
++  { error: "Request body too large" }` on `/chat` and `/complete-setup`, with the
++  CORS header, as before. Without it a 100 MB body would have been buffered whole.
++- **Config:** `wrangler.jsonc` `vars` holds only the four non-personal values that
++  equal the code defaults. Everything else (credentials *and* `ALLOWED_ORIGIN`,
++  `SUPABASE_URL`, `RAHEEM_NOTIFY_EMAIL`, `RAHEEM_WHATSAPP_NUMBER`,
++  `RESEND_FROM_EMAIL`) is a secret uploaded from a gitignored `secrets.json`
++  (template: `secrets.example.json`) — a deliberate deviation from the plan's
++  "plain vars" list, so Raheem's personal contact details never enter git history
++  and no placeholder value can be deployed. `npm run check:secrets` validates the
++  file before upload. `PORT` and `OPENROUTER_SOCKS5_PROXY` are dead and not migrated.
++- **Deploy:** `npx wrangler deploy --secrets-file secrets.json` (verified with
++  `--dry-run` on wrangler 4.145): the secrets go up with the deployment.
++  `scripts/smoke-deployed.mjs` is a smoke test for the real URL — read-only by
++  default; `--with-chat` / `--run-cron` are opt-in because they spend OpenRouter
++  credit / run the real jobs. `scripts/smoke-selfcheck.mjs` proves that script works.
++- `.env.example` → `.dev.vars.example`; README rewritten for Workers (no more
++  Vercel / Render / cron-job.org / Express); this file's older entries are history.
++
++## Tests — 247/247 (was 178), 27 files (was 24), `tsc` clean on both configs
++Accounting against the stage-4 zip, file by file:
++- **Removed:** `asyncHandler.test.ts` (7). Its three `asyncHandler` tests and the
++  `headersSent` test are Express-only. "Unknown error → 500 without leaking
++  details" is covered by `workerApp.test.ts`; "4xx keeps its status" by the new
++  413/400 tests in `httpBody.test.ts`; "`applyCors` reads `ALLOWED_ORIGIN` per
++  request" is now a `workerApp.test.ts` test (6 → 7).
++- **Ported, same four cases:** `cronAuth.test.ts` (Express `Request` → Web `Request`).
++- **New:** `uploadPdf` 23, `cron` 26, `lookupSignup` 12, `httpBody` 14.
++- **Every other file unchanged** (identical counts).
++- Each new safeguard has a negative control: removing it makes a test fail
++  (size-cap pre-check, streaming counter, NaN fail-open, lookup privacy,
++  duplicate-secret rejection, activate-before-insert order, cron drift, silent
++  unknown cron, 413 vs 400, `scheduled()` signature under `tsc`).
++
++## End-to-end on real local workerd
++`npm run check:lock` ALL CHECKS PASSED · `check:chat` 19/19 · `check:upload` 21/21
++· `check:cron` 26/26 · `node scripts/smoke-selfcheck.mjs` 9/9. (`mock-supabase.mjs`
++gained generic filters, a storage API and a `stores` table — additively; the
++Stage 3 and 4 checks pass unchanged against it.)
++
++## Not proven yet (only a real deploy shows these)
++- That Cloudflare's scheduler fires both Cron Triggers on time.
++- CPU time on the Free plan (10 ms): `/upload-pdf` does the most work; the PDF
++  parse alone measured 1–4 ms in Node, which is not `workerd` and not the whole
++  request. Watch for error 1102.
++- That OpenRouter accepts requests from Cloudflare's network (`--with-chat`).
++- The `SetupLock` Durable Object on real Cloudflare (`concurrency-test.mjs` needs
++  the mock Supabase's OTP-write counter, so it can't be pointed at a real URL, and
++  `/complete-setup` writes real rows and calls Meta).
++- The sed.sh verdict path end to end (its base URL is hard-coded; unit-tested only).
++- Subrequests: 50 per invocation on Free, so roughly 16–24 rows per cron run.
+diff --git a/README.md b/README.md
+index dbb4447..e896ce2 100644
+--- a/README.md
++++ b/README.md
+@@ -1,8 +1,11 @@
+ # Ava — Onboarding Backend
+ 
+-Stateless Vercel serverless functions implementing Ava's `POST /chat` contract,
+-a separate post-chat `POST /complete-setup` form submission, a manual
+-verification handoff, and a cron-driven activation step.
++A Cloudflare Worker (Hono) implementing Ava's `POST /chat` contract, a
++separate post-chat `POST /complete-setup` form submission, `GET /lookup-signup`,
++`POST /upload-pdf`, a manual verification handoff, and two Cloudflare Cron
++Triggers (activation + PDF-scan sweep). One entry point: `src/index.ts`.
++(The earlier Vercel → Render → Termux/Express builds live on the `main`
++branch; `server.ts` and everything Express-specific is gone from this one.)
+ 
+ ## Two-step signup: chat, then a form
+ 
+@@ -368,7 +371,7 @@ less — so it's an acceptable approximation for a path that's only meant to
+ be hit during migration skew, not normal operation.
+ 
+ Every time the ceiling actually trips, it's logged via `console.log` (see
+-`lib/trialCeiling.ts`) so Raheem notices it happening in the Vercel logs
++`lib/trialCeiling.ts`) so Raheem notices it happening in the Workers logs (`npx wrangler tail`, or the dashboard's Observability tab)
+ rather than it silently capping signups with no visible trace.
+ 
+ ### `stores` and `promo_codes` — what's mirrored, what isn't
+@@ -512,31 +515,21 @@ environment; the endpoint returns `401` if it's unset (fails closed, never
+ runs open) or if the caller doesn't supply the same value via
+ `Authorization: Bearer <secret>` or `?secret=<secret>`.
+ 
+-**cron-job.org**: create a job with URL
+-`https://<your-service>.onrender.com/cron/activate-pending?secret=<CRON_SECRET>`,
+-method `GET`, schedule every 15–30 minutes.
+-
+-**GitHub Actions** alternative (`.github/workflows/activate-pending.yml`):
+-
+-```yaml
+-name: Activate pending signups
+-on:
+-  schedule:
+-    - cron: "*/20 * * * *"   # every 20 minutes
+-  workflow_dispatch: {}       # allows manual trigger from the Actions tab
+-jobs:
+-  activate:
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Call activation cron
+-        run: |
+-          curl -sf "https://<your-service>.onrender.com/cron/activate-pending?secret=${{ secrets.CRON_SECRET }}"
+-```
++**How it runs:** a Cloudflare Cron Trigger — `*/15 * * * *` (UTC), declared in
++`wrangler.jsonc` and handled by `scheduled()` in `src/cron.ts`. Cloudflare's own
++edge calls the Worker directly (no HTTP request, so no secret involved). The
++two cron expressions in `wrangler.jsonc` and `src/cron.ts` must match exactly
++— a test fails if they drift, and an unrecognized expression throws (a visible
++failed invocation) rather than silently doing nothing. Each run logs a
++`[cron] activate-pending {...}` summary line (`wrangler tail`).
++
++**Manual run / ops fallback:** `GET /cron/activate-pending` with `CRON_SECRET`
++still works — handy for "run it right now". It calls the same
++`runActivatePending()` the schedule does. Example:
++`curl -H "Authorization: Bearer $CRON_SECRET" https://<worker>.workers.dev/cron/activate-pending`
+ 
+-Set `CRON_SECRET` as a repo secret matching the Vercel environment variable.
+-GitHub Actions' schedule is best-effort and can slip by several minutes
+-under load — fine for a 15–30 min cadence, not something to rely on for
+-tighter timing.
++Free plan note: Cloudflare allows 5 Cron Triggers per **account** (not per
++Worker); this Worker uses 2.
+ 
+ ## PDF upload + malware scan (sed.sh)
+ 
+@@ -592,9 +585,9 @@ Telegram so you still see the file yourself before approving a signup.
+ 
+ Sibling to `/cron/activate-pending`, same `CRON_SECRET` auth pattern, kept
+ as a separate endpoint since the two crons act on different row states and
+-mixing their loops made the output harder to read. Point a second scheduled
+-job at it on the same ~15–30 min cadence (see the activation cron's
+-cron-job.org / GitHub Actions config above — just swap the URL).
++mixing their loops made the output harder to read. Its Cron Trigger is
++`*/20 * * * *` (UTC), also in `wrangler.jsonc` / `src/cron.ts`; the manual
++`GET /cron/sweep-pdf-scans` + `CRON_SECRET` fallback works exactly as above.
+ 
+ For every `pending_signups` row where `status = 'scan_pending'`
+ (`lib/pdfScanSweep.ts`, `sweepPdfScans()`): `GET /malware/scan/{scanId}`
+@@ -621,8 +614,8 @@ forces a fresh manual review rather than silently resuming. See
+ 
+ Confirmed and not revisited: VirusTotal's free tier bars commercial use in
+ its own ToS and actively flags cloud-IP traffic (i.e. requests from
+-Vercel's own IP ranges get treated with more suspicion than a residential
+-IP would). `lib/virustotal.ts` is deleted; sed.sh (`lib/malwareScan.ts`)
++a cloud provider's own IP ranges get treated with more suspicion than a
++residential IP would). `lib/virustotal.ts` is deleted; sed.sh (`lib/malwareScan.ts`)
+ replaces it entirely. Do not reintroduce VirusTotal anywhere in this
+ project.
+ 
+@@ -650,24 +643,40 @@ re-exports.
+   threatStatus: "NO_THREATS_FOUND"|"THREATS_FOUND"|"RUNNING", fileName,
+   threats: [] }`
+ 
+-### Serverless timeout note (unrelated to which scanner is used)
++### Workers limits worth knowing (Free plan)
+ 
+-Neither `/upload-pdf` nor the sweep cron ever wait on a scan verdict inside
+-a request — that's the entire reason the verdict got moved to a cron in the
+-first place. `api/chat.ts` still has `maxDuration: 30` in `vercel.json`,
+-which exceeds Vercel's **Hobby plan's hard 10s cap per function**
+-(`vercel.json`'s `maxDuration` doesn't override that ceiling) — two
+-sequential OpenRouter calls plus Supabase writes plausibly need more than
+-10s. Not changed in this pass since it wasn't in scope, but worth deciding
+-if you're actually deploying to Hobby.
++Neither `/upload-pdf` nor the sweep cron ever wait on a scan verdict inside a
++request — that's the entire reason the verdict lives in a cron. Cloudflare's
++Free plan limits **CPU time** (not time spent waiting on the network) to about
++10 ms per request and **subrequests** to 50 per invocation (see Cloudflare's
++"Limits" page — they change). The one request that does real CPU work is
++`/upload-pdf` (multipart parse + `pdf-lib` page count); locally the PDF parse
++costs a few ms, but only a real deploy shows the total. If `/upload-pdf` ever
++returns Cloudflare error **1102** ("exceeded CPU"), lower `MAX_PDF_SIZE_BYTES`.
++The cron jobs make one Supabase call per row plus one sed.sh call per scan, so
++they stay under 50 subrequests only up to roughly 16–24 rows per run — far
++above current volume; the rest are picked up on the next run.
+ 
+ ## Setup
+ 
+ ```bash
+ npm install
+-cp .env.example .env.local   # fill in real values
+-npm run dev                  # tsx server.ts (Express, same as Render)
+-npm test                     # package/is_api_free guard + referral codes + trial ceiling + token budgets + contact_number tracking + complete-setup + otpHandoff + otpCode + pdfFlow + malwareScan + pdfScanSweep tests
++cp .dev.vars.example .dev.vars   # fill in real values (gitignored)
++npm run dev                      # wrangler dev -> http://127.0.0.1:8787
++npm test                         # vitest: the whole unit suite
++npm run build                    # tsc --noEmit for both tsconfigs
++```
++
++Local end-to-end checks (each starts a real local `workerd` via `wrangler dev`
++plus mock Supabase/OpenRouter servers — no network, no credentials; the result
++is "passed locally", never "verified on Cloudflare"):
++
++```bash
++npm run check:chat      # POST /chat
++npm run check:lock      # POST /complete-setup double-submit lock (Durable Object)
++npm run check:upload    # POST /upload-pdf (multipart, size caps, pdf-lib under workerd)
++npm run check:cron      # scheduled() + manual /cron/* + GET /lookup-signup
++node scripts/smoke-selfcheck.mjs   # proves scripts/smoke-deployed.mjs works
+ ```
+ 
+ Also run `pending_signups_table.sql` against Supabase — it's idempotent and
+@@ -676,65 +685,52 @@ value remapping) to bring an already-deployed table from the old
+ automated-OTP schema to the current one, not just a fresh-table
+ `create table if not exists`. Also run `promo_codes_table.sql` (new table,
+ required for referral codes to validate at all — see "Referral codes"
+-above) and populate it by hand with whatever codes should exist.
++above) and populate it by hand with whatever codes should exist. And
++`pdf_storage_bucket.sql` for the private PDF bucket.
+ 
+ ## Environment variables
+ 
+-See `.env.example` for the full list and comments. The ones that need a
+-real decision before deploying:
++`.dev.vars.example` has the full list with comments (local use). On
++Cloudflare they are split two ways (see "Deploying"):
++
++- **`vars` in `wrangler.jsonc`** (plain text, committed): `AVA_CONVERSATION_MODEL`,
++  `DEFAULT_AUTO_AI_MODEL`, `MAX_PDF_SIZE_BYTES`, `SUPABASE_PDF_BUCKET` — set to
++  the same values the code defaults to.
++- **Secrets** (uploaded from `secrets.json`, never in git): everything else —
++  the credentials *and* the values specific to Raheem (`ALLOWED_ORIGIN`,
++  `SUPABASE_URL`, `RAHEEM_NOTIFY_EMAIL`, `RAHEEM_WHATSAPP_NUMBER`,
++  `RESEND_FROM_EMAIL`). Template: `secrets.example.json`.
++
++`PORT` and `OPENROUTER_SOCKS5_PROXY` no longer exist. The ones that need a real
++decision before deploying:
+ 
+ - `AVA_CONVERSATION_MODEL` — must be an OpenRouter model that supports
+   `response_format: {"type": "json_object"}`, since both of Ava's calls
+   rely on strict JSON output.
++- `ALLOWED_ORIGIN` — the site's exact origin, e.g. `https://you.github.io`
++  (no path, no trailing slash; CORS compares it literally). Unset = no CORS
++  header at all (fails closed), so the site can't call the API.
+ - `RAHEEM_WHATSAPP_NUMBER` — where clients are told to text their code
+-  (now read by `api/complete-setup.ts`, not `api/chat.ts` — see "Meta
+-  setup" above). Also reused as the support-contact number for the
+-  `contact_number` duplicate-registration block and the token-budget
+-  cutoff in `api/chat.ts`.
++  (read by `api/complete-setup.ts` and `api/chat.ts` — see "Meta setup"
++  above). Also reused as the support-contact number for the `contact_number`
++  duplicate-registration block and the token-budget cutoff in `api/chat.ts`.
++  Required: both routes answer 500 without it.
+ - `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `RAHEEM_NOTIFY_EMAIL` — the
+   notification email. All three are required or the send is skipped with a
+   logged (non-fatal) error.
+-- `CRON_SECRET` — required for both `/cron/activate-pending` and
+-  `/cron/sweep-pdf-scans` to ever respond with anything but 401.
++- `CRON_SECRET` — required for the manual `/cron/*` routes to ever respond
++  with anything but 401. (`scheduled()` doesn't use it.)
+ - `SED_SH_API_KEY` — optional. When set, `/upload-pdf` runs real malware
+   scanning as described above; when unset, scanning is skipped (not an
+-  error) — see the ⚠️ note in "PDF upload + malware scan" above. Replaces
+-  `VIRUSTOTAL_API_KEY`
+-  everywhere — VirusTotal is scrapped (see "PDF upload + malware scan"
+-  above), including in Vercel's own project settings, not just this repo.
++  error) — see the ⚠️ note in "PDF upload + malware scan" above.
++- `OPENROUTER_API_BASE` — optional escape hatch (e.g. a gateway in front of
++  OpenRouter). Unset = call OpenRouter directly.
+ - `MAX_PDF_SIZE_BYTES` — defaults to 10MB, not from a written spec.
+ 
+-## Local hosting: proxy, streaming, PII masking
+-
+-> **`workers` branch (Stage 4):** the SOCKS5 proxy and `stream: true`
+-> described in the first two bullets below were REMOVED. They existed
+-> only because Ava ran on a phone behind a VPN; a Worker calls
+-> OpenRouter from Cloudflare's network with plain `fetch()`. They are
+-> kept here as history for `main` (the Termux build). What replaced
+-> them is in `CHANGES.md` → "Workers migration — Stage 4".
+-
+-While there's no cloud hosting with no card required and confirmed
+-commercial-use terms, Ava runs on a local device instead (see
+-`README`'s "Deploying" section below for why Render didn't pan out
+-either). Three things in `lib/openrouter.ts` and `lib/piiMasking.ts`
+-existed specifically for that:
+-
+-- **`OPENROUTER_SOCKS5_PROXY`** (optional) — OpenRouter is blocked in
+-  Syria, so this device runs behind a VPN with a local SOCKS5 endpoint.
+-  Only the OpenRouter HTTP client is routed through it; nothing else in
+-  this codebase is affected. Empty/unset (e.g. back on a cloud host
+-  later) means call OpenRouter directly — no code change needed there.
+-- **`stream: true`** on every OpenRouter call — not for incremental
+-  delivery (WhatsApp has no in-place-edit concept; the caller still
+-  only ever gets one complete string back). It's there because a SOCKS5
+-  proxy on an unstable mobile connection can treat a long silent gap as
+-  a dead connection and drop it mid-response; streaming keeps bytes
+-  arriving the whole time the model is generating, so the connection
+-  reads as alive. Chunks were accumulated internally in
+-  `streamChatCompletion()` and parsed exactly like a non-streaming
+-  response.
++## PII masking and the OpenRouter client
++
+ - **Phone-number masking** (`lib/piiMasking.ts`) — every conversation
+-  message is masked before it leaves this process, and restored in
++  message is masked before it leaves the Worker, and restored in
+   every string field of the model's response (whatever shape that
+   response has) before this file returns it. `systemPrompt` is never
+   masked — it's Boltane's own instructions, not customer data.
+@@ -749,47 +745,81 @@ existed specifically for that:
+   not more, since several distinct Arabic letters typically collapse
+   onto the same Latin one in a transliteration scheme).
+ - 60s timeout + 2 retries (2s, then 4s backoff) on a network failure or
+-  429/5xx — a single dropped attempt on an unstable connection
+-  shouldn't fail the customer's whole turn.
+-
+-✅ **Gap closed on `workers` (Stage 4):** `lib/openrouter.ts`'s real
+-request/response/retry path is now covered by `tests/openrouterApiBase`,
+-`tests/openrouterMasking` and `tests/openrouterRetry` (global `fetch`
+-stubbed; the module itself is not mocked). `tests/chat.test.ts` still
+-mocks the whole module, by design — it tests chat.ts's own logic.
+-
+-
+-
+-**Migrated from Vercel to Render** — Vercel's Hobby plan explicitly
+-prohibits commercial use (Boltane charges customers), and Pro needs a
+-card that isn't available yet. Render's free tier has neither
+-restriction and is already used for `boltane-core-engine`.
+-
+-`server.ts` is the actual entrypoint now — it wires the same six
+-`api/*.ts` handlers (unchanged logic, just a type-import swap from
+-`@vercel/node` to `express`) into routes on one persistent Express app,
+-since Render runs a normal long-lived process rather than one
+-serverless function per file. See that file's own header comment for
+-why routes are mounted with `app.all()` instead of `app.post()`/
+-`app.get()`.
+-
+-**On Render** (Web Service, same account as core-engine — see that
+-repo's `DEPLOYMENT.md` for the account/keep-alive reasoning, applies
+-here too):
+-- Build command: `npm install && npm run build:server`
+-- Start command: `npm start`
+-- Health check path: `/health`
+-- Set every var from `.env.example` directly in Render's dashboard —
+-  none of them belong in frontend code or the GitHub Pages repo.
+-- **Do not** add an aggressive keep-alive ping for this service. Both
+-  it and core-engine now share one 750-hour/month free pool on the
+-  same account — letting each sleep between real requests is what
+-  keeps combined usage well under that limit at current traffic. A
+-  sleeping service costs an occasional 30-60s cold start on the first
+-  request after a lull, not correctness.
+-
+-**Local dev**: `npm run dev` (`tsx server.ts`, reads `.env.local`
+-directly — no Vercel CLI needed anymore).
++  429/5xx in `lib/openrouter.ts` — a single dropped attempt shouldn't fail
++  the customer's whole turn.
++- Gone on this branch: the SOCKS5 proxy and `stream: true`. They existed only
++  because Ava ran on a phone behind a VPN; a Worker calls OpenRouter from
++  Cloudflare's network with plain `fetch()`. (History: `CHANGES.md`, "Workers
++  migration — Stage 4".)
++- Request bodies: JSON bodies are capped at 4.5 MB (`lib/httpBody.ts` → 413
++  `{ "error": "Request body too large" }`), as `express.json()` did; PDFs at
++  `MAX_PDF_SIZE_BYTES` (+1 MB headroom), enforced while streaming.
++
++✅ `lib/openrouter.ts`'s real request/response/retry path is covered by
++`tests/openrouterApiBase`, `tests/openrouterMasking` and
++`tests/openrouterRetry` (global `fetch` stubbed; the module itself is not
++mocked). `tests/chat.test.ts` still mocks the whole module, by design — it
++tests chat.ts's own logic.
++
++## Deploying (Cloudflare Workers)
++
++One Worker (`src/index.ts`): the Hono routes, the `SetupLock` Durable Object,
++and `scheduled()`. Deploy from a **GitHub Codespace** — not from Termux
++(Cloudflare's tooling is unreliable there) and not from a sandbox with no route
++to Cloudflare's API.
++
++**1. Once:** Cloudflare dashboard → My Profile → API Tokens → Create Token →
++template **"Edit Cloudflare Workers"**. In the Codespace, export:
++
++```bash
++export CLOUDFLARE_API_TOKEN=...      # or add as Codespace secrets
++export CLOUDFLARE_ACCOUNT_ID=...
++npm install
++```
++
++**2. Secrets file** (gitignored — never commit it):
++
++```bash
++cp secrets.example.json secrets.json
++openssl rand -hex 32                 # paste the output as CRON_SECRET
++# edit secrets.json: replace every REPLACE_ME with the real value
++# add "SED_SH_API_KEY" only if sed.sh is funded; otherwise leave it out
++npm run check:secrets                # must say OK before you continue
++```
++
++**3. Deploy** — the secrets go up *with* the deployment, so the Worker is never
++live without them:
++
++```bash
++npx wrangler deploy --secrets-file secrets.json
++```
++
++(Later deploys don't need the file; secrets are never deleted by a deploy. To
++change one: `npx wrangler secret put NAME`.) Then delete the local file:
++`shred -u secrets.json`.
++
++**4. Smoke test the real URL** — label a pass "verified on Cloudflare":
++
++```bash
++npx wrangler tail                    # in a second terminal, keep it open
++npm run smoke:deployed -- https://ava-onboarding-backend.<account>.workers.dev \
++    --origin https://<you>.github.io
++```
++
++The default run is read-only: no rows, no messages, no OpenRouter spend. Add
++`--with-chat` for ONE real OpenRouter call (the only check that proves
++OpenRouter accepts Cloudflare's network), and `--cron-secret <CRON_SECRET>
++--run-cron` to run both jobs once for real. Not checkable from outside:
++whether the scheduler fires on time (watch `wrangler tail` for
++`[cron] activate-pending` / `[cron] sweep-pdf-scans` lines at :00/:15/:30/:45
++and :00/:20/:40), CPU limits under real traffic (error 1102), and
++`POST /complete-setup` (writes real rows, calls Meta).
++
++**5. Cutover** (only after step 4 passes): point the GitHub Pages frontend's API
++base URL at the `workers.dev` URL. Keep the Termux instance running and
++reachable the whole time; watch real traffic with `wrangler tail` for a while;
++only then stop it (stop, don't delete). Rolling back = point the frontend back
++at the Quick Tunnel URL.
+ 
+ ## Confirmed (previously open questions)
+ 
+diff --git a/api/chat.ts b/api/chat.ts
+index d15cea1..ba4d61d 100644
+--- a/api/chat.ts
++++ b/api/chat.ts
+@@ -138,8 +138,11 @@ export default async function handler(c: Context<{ Bindings: Env }>): Promise<Re
+ 
+   const parsed = await readJsonBody(c.req.raw);
+   if (!parsed.ok) {
+-    // Malformed JSON — what express.json() + errorMiddleware answered.
+-    return c.json({ error: "Invalid request" }, 400);
++    // What express.json() + errorMiddleware answered: 413 over the body
++    // cap (lib/httpBody.ts), 400 for malformed JSON.
++    return parsed.tooLarge
++      ? c.json({ error: "Request body too large" }, 413)
++      : c.json({ error: "Invalid request" }, 400);
+   }
+   const body = (parsed.value ?? {}) as Partial<ChatRequest>;
+   // Runtime shape check — a malformed entry (null, missing content,
+diff --git a/api/complete-setup.ts b/api/complete-setup.ts
+index 17fd90a..89c7972 100644
+--- a/api/complete-setup.ts
++++ b/api/complete-setup.ts
+@@ -93,7 +93,10 @@ export default async function handler(c: Context<{ Bindings: Env }>): Promise<Re
+ 
+   const parsed = await readJsonBody(c.req.raw);
+   if (!parsed.ok) {
+-    return c.json({ error: "Invalid request" }, 400);
++    // 413 over the body cap (lib/httpBody.ts), 400 for malformed JSON.
++    return parsed.tooLarge
++      ? c.json({ error: "Request body too large" }, 413)
++      : c.json({ error: "Invalid request" }, 400);
+   }
+   const body = (parsed.value ?? {}) as Partial<CompleteSetupRequest>;
+   const contactNumber =
+diff --git a/lib/asyncHandler.ts b/lib/asyncHandler.ts
+deleted file mode 100644
+index f444d96..0000000
+--- a/lib/asyncHandler.ts
++++ /dev/null
+@@ -1,50 +0,0 @@
+-// lib/asyncHandler.ts
+-//
+-// Express 4 does NOT catch a rejected promise from an async route
+-// handler: an exception thrown outside a handler's own try/catch became
+-// an unhandled rejection, which on Node >= 15 terminates the whole
+-// process. server.ts wraps every route in asyncHandler() so any such
+-// error is forwarded to errorMiddleware() (a JSON 4xx/5xx response)
+-// instead of taking the server down. No handler's own logic changes.
+-import type { NextFunction, Request, RequestHandler, Response } from "express";
+-import { applyCors } from "./cors";
+-
+-export function asyncHandler(
+-  handler: (req: Request, res: Response) => unknown
+-): RequestHandler {
+-  return (req, res, next) => {
+-    Promise.resolve()
+-      .then(() => handler(req, res))
+-      .catch(next);
+-  };
+-}
+-
+-export function errorMiddleware(
+-  err: unknown,
+-  _req: Request,
+-  res: Response,
+-  next: NextFunction
+-): void {
+-  if (res.headersSent) {
+-    next(err);
+-    return;
+-  }
+-
+-  // CORS headers too, so the browser shows the real status instead of
+-  // a misleading CORS failure.
+-  applyCors(res);
+-
+-  const e = err as { status?: unknown; statusCode?: unknown } | null;
+-  const raw = e?.status ?? e?.statusCode;
+-  const status =
+-    typeof raw === "number" && raw >= 400 && raw < 500 ? raw : 500;
+-
+-  if (status === 500) {
+-    console.error("Unhandled route error:", err);
+-    res.status(500).json({ error: "Internal server error" });
+-    return;
+-  }
+-  res.status(status).json({
+-    error: status === 413 ? "Request body too large" : "Invalid request",
+-  });
+-}
+diff --git a/lib/cors.ts b/lib/cors.ts
+deleted file mode 100644
+index b07bd9e..0000000
+--- a/lib/cors.ts
++++ /dev/null
+@@ -1,15 +0,0 @@
+-// lib/cors.ts
+-import type { Response } from "express";
+-
+-export function applyCors(res: Response): void {
+-  // Read per request, not at module load — module-load reads depend on
+-  // dotenv having run first, which is not guaranteed under `tsx` (it
+-  // hoists imports above server.ts's dotenv line).
+-  const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
+-  if (ALLOWED_ORIGIN) {
+-    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+-  }
+-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+-  res.setHeader("Vary", "Origin");
+-}
+diff --git a/lib/cronAuth.ts b/lib/cronAuth.ts
+index aedcee6..017d9d1 100644
+--- a/lib/cronAuth.ts
++++ b/lib/cronAuth.ts
+@@ -1,22 +1,20 @@
+ // lib/cronAuth.ts
+ //
+-// Shared auth check for both cron endpoints. Same rules as before
+-// (Bearer header or ?secret=, fail closed if CRON_SECRET is unset).
++// Shared auth check for the two MANUAL cron routes (GET /cron/activate-pending
++// and GET /cron/sweep-pdf-scans). Same rules as always: Bearer header or
++// ?secret=, fail closed if CRON_SECRET is unset. (scheduled() never goes
++// through here — Cloudflare's own edge invokes it, there is no Request.)
+ //
+-// NOT switched to crypto.subtle.timingSafeEqual here, despite that
+-// being Cloudflare's current recommendation for this exact use case —
+-// tried it in Stage 2 and reverted after actually running the tests:
+-// this file is still imported by server.ts (Express, runs under Node)
+-// until Stage 7, and crypto.subtle.timingSafeEqual is a Workers-only
+-// SubtleCrypto extension — confirmed absent from Node's SubtleCrypto at
+-// runtime (`crypto.subtle.timingSafeEqual is not a function`, caught by
+-// tests/cronAuth.test.ts actually failing under `vitest run`, not just
+-// guessed). Node's own `timingSafeEqual` below already works on both
+-// Node and Workers (confirmed in the migration audit's probe), so it
+-// stays until Stage 7, when server.ts is retired and this file only
+-// ever runs on Workers — that's the right time to make the switch.
++// Uses Node's `timingSafeEqual` from "crypto" — available on Workers under
++// the compatibility_date in wrangler.jsonc (confirmed in the migration
++// audit's probe, and exercised for real under local workerd by
++// scripts/cron-check.mjs: 401 for wrong secrets, 200 for the right one).
++// Stage 7 deliberately did NOT swap it for Cloudflare's
++// crypto.subtle.timingSafeEqual: that was optional, buys nothing here, and
++// Stage 7 is the one stage that touches real users. If it is ever adopted,
++// keep the length check below — the Workers version throws on mismatched
++// lengths instead of returning false (confirmed in Stage 2).
+ import { timingSafeEqual } from "crypto";
+-import type { Request as ExpressRequest } from "express";
+ 
+ function safeEqual(a: string, b: string): boolean {
+   const ab = Buffer.from(a);
+@@ -25,27 +23,11 @@ function safeEqual(a: string, b: string): boolean {
+   return timingSafeEqual(ab, bb);
+ }
+ 
+-export function isCronAuthorized(req: ExpressRequest): boolean {
+-  const expected = process.env.CRON_SECRET;
+-  if (!expected) return false; // fail closed if unset — never run open
+-
+-  const headerAuth = req.headers.authorization;
+-  if (typeof headerAuth === "string" && safeEqual(headerAuth, `Bearer ${expected}`)) {
+-    return true;
+-  }
+-
+-  const querySecret = req.query.secret;
+-  return typeof querySecret === "string" && safeEqual(querySecret, expected);
+-}
+-
+ /**
+- * Same check for a standard Web `Request` (what Hono hands the Workers
+- * routes — Stage 6). Same rules, same secret comparison; the only thing
+- * that differs is where the two inputs come from. Repeated `?secret=a&
+- * secret=b` is passed on as an ARRAY, exactly what Express's req.query
+- * gave isCronAuthorized() above, so it is rejected the same way (Hono's
+- * own c.req.query() would silently return just the first value).
+- * Stage 7 deletes the Express variant and keeps only this one.
++ * Check for a standard Web `Request` (what Hono hands the routes). Repeated
++ * `?secret=a&secret=b` is REJECTED rather than "first value wins" — Express's
++ * req.query gave an array for that, which the old check refused, and Hono's
++ * own c.req.query() would silently return just the first value.
+  */
+ export function isCronAuthorizedRequest(req: Request): boolean {
+   const expected = process.env.CRON_SECRET;
+diff --git a/lib/httpBody.ts b/lib/httpBody.ts
+index 871bf66..33cfa42 100644
+--- a/lib/httpBody.ts
++++ b/lib/httpBody.ts
+@@ -1,24 +1,76 @@
+ // lib/httpBody.ts
+ //
+-// JSON body reading for Hono handlers, matching what express.json()
+-// did for the old Express handlers so no route's observable behavior
+-// changes:
++// JSON body reading for Hono handlers, matching what express.json({ limit:
++// "4.5mb" }) did for the old Express handlers so no route's observable
++// behavior changes:
+ //   - empty body            -> {}   (handler then answers its own
+ //                                    "missing field(s)" 400)
+ //   - malformed JSON        -> { ok: false }  (handler answers 400
+ //                                    { error: "Invalid request" }, the
+ //                                    same body errorMiddleware gave)
+-// Hono's own c.req.json() would throw on both, and a bare throw would
++//   - body over the cap     -> { ok: false, tooLarge: true }  (handler
++//                                    answers 413 { error: "Request body
++//                                    too large" }, as errorMiddleware did)
++// Hono's own c.req.json() would throw on all three, and a bare throw would
+ // turn into a 500 — a real behavior change for a client mistake.
+-export type JsonBody = { ok: true; value: unknown } | { ok: false };
++//
++// STAGE 7: the cap is new on Workers. server.ts's express.json() enforced
++// 4.5mb (Vercel's old default) so a huge body was refused before it was
++// parsed; req.text() has no such limit — a Worker request body can be up
++// to 100 MB on the Free plan against a 128 MB isolate, so without this an
++// oversized /chat or /complete-setup body would be buffered whole. Same
++// two-layer approach as /upload-pdf (api/upload-pdf.ts): refuse on a
++// declared Content-Length without reading a byte, and count bytes as they
++// stream in for a chunked / absent / dishonest Content-Length.
++export type JsonBody =
++  | { ok: true; value: unknown }
++  | { ok: false; tooLarge?: boolean };
++
++/** What body-parser's "4.5mb" meant: 4.5 * 1024 * 1024 bytes. */
++export const MAX_JSON_BODY_BYTES = Math.floor(4.5 * 1024 * 1024);
++
++export async function readJsonBody(
++  req: Request,
++  maxBytes: number = MAX_JSON_BODY_BYTES
++): Promise<JsonBody> {
++  // 1. Honest clients declare their size: refuse without reading a byte.
++  const declared = Number(req.headers.get("content-length"));
++  if (Number.isFinite(declared) && declared > maxBytes) {
++    return { ok: false, tooLarge: true };
++  }
++
++  // No body at all -> same as an empty body.
++  if (!req.body) return { ok: true, value: {} };
+ 
+-export async function readJsonBody(req: Request): Promise<JsonBody> {
+-  let text: string;
++  // 2. Count as it streams; stop (and cancel the upstream read) the moment
++  // the cap is crossed, so nothing past it is ever buffered.
++  const reader = req.body.getReader();
++  const chunks: Uint8Array[] = [];
++  let seen = 0;
+   try {
+-    text = await req.text();
++    for (;;) {
++      const { done, value } = await reader.read();
++      if (done) break;
++      seen += value.byteLength;
++      if (seen > maxBytes) {
++        await reader.cancel().catch(() => {});
++        return { ok: false, tooLarge: true };
++      }
++      chunks.push(value);
++    }
+   } catch {
+-    return { ok: false };
++    return { ok: false }; // the connection broke mid-body: a bad request, not a 500
++  }
++
++  const bytes = new Uint8Array(seen);
++  let offset = 0;
++  for (const c of chunks) {
++    bytes.set(c, offset);
++    offset += c.byteLength;
+   }
++  // Same decoding req.text() does (UTF-8, BOM stripped, malformed bytes -> U+FFFD).
++  const text = new TextDecoder().decode(bytes);
++
+   if (!text.trim()) return { ok: true, value: {} };
+   try {
+     return { ok: true, value: JSON.parse(text) };
+diff --git a/lib/openrouter.ts b/lib/openrouter.ts
+index 555a68f..bcff864 100644
+--- a/lib/openrouter.ts
++++ b/lib/openrouter.ts
+@@ -95,8 +95,8 @@ export async function callOpenRouterJSON<T>(
+     ...(maxOutputTokens ? { max_tokens: maxOutputTokens } : {}),
+   };
+ 
+-  // Read per call (not cached at module load) — same reasoning as
+-  // lib/cors.ts, and what tests/openrouterApiBase.test.ts pins down.
++  // Read per call (not cached at module load): on Workers the env is only
++  // populated per request, and tests/openrouterApiBase.test.ts pins this down.
+   const endpoint = process.env.OPENROUTER_API_BASE || DEFAULT_OPENROUTER_URL;
+ 
+   let lastError: unknown;
+diff --git a/lib/pdfValidation.ts b/lib/pdfValidation.ts
+index 43c54e4..593742a 100644
+--- a/lib/pdfValidation.ts
++++ b/lib/pdfValidation.ts
+@@ -21,7 +21,7 @@ export function isPdfMagicBytes(buffer: Buffer): boolean {
+   // Byte-by-byte rather than `buffer.subarray(0, 5).equals(...)`: under
+   // tsconfig.workers.json (Cloudflare + Node types loaded together)
+   // `Buffer.prototype.equals` loses its type declaration — a type-level
+-  // quirk only, runtime Buffer has it — so this keeps `build:workers`
++  // quirk only, runtime Buffer has it — so this keeps `tsc -p tsconfig.workers.json`
+   // clean with identical behavior (tests/pdfValidation.test.ts).
+   return (
+     buffer.length >= PDF_MAGIC_BYTES.length &&
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index 6ecc63d..1b341fb 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -194,7 +194,7 @@ export async function findVerifiedReadySignups(): Promise<PendingSignupRow[]> {
+   return (data as PendingSignupRow[] | null) ?? [];
+ }
+ 
+-// Read per call (not at module load) — see lib/cors.ts for why.
++// Read per call, not at module load (see the note in lib/openrouter.ts).
+ const pdfBucket = (): string => process.env.SUPABASE_PDF_BUCKET || "signup-pdfs";
+ 
+ /**
+diff --git a/package.json b/package.json
+index 3c5433e..21e5231 100644
+--- a/package.json
++++ b/package.json
+@@ -2,32 +2,28 @@
+   "name": "ava-onboarding-backend",
+   "version": "1.0.0",
+   "private": true,
+-  "description": "Ava — Boltane's WhatsApp bot onboarding chat backend (Express server, deployed on Render).",
++  "description": "Ava \u2014 Boltane's WhatsApp bot onboarding chat backend (Cloudflare Worker: Hono + a SetupLock Durable Object + Cron Triggers).",
+   "scripts": {
+-    "dev": "tsx server.ts",
+-    "build": "tsc --noEmit",
+-    "build:server": "tsc -p tsconfig.build.json",
+-    "start": "node dist/server.js",
++    "dev": "wrangler dev",
++    "build": "tsc --noEmit && tsc -p tsconfig.workers.json",
+     "test": "vitest run",
+-    "build:workers": "tsc -p tsconfig.workers.json",
+-    "dev:workers": "wrangler dev",
+-    "deploy:workers": "wrangler deploy",
++    "deploy": "wrangler deploy",
+     "check:lock": "node scripts/lock-check.mjs",
+     "check:chat": "node scripts/chat-check.mjs",
++    "check:upload": "node scripts/upload-check.mjs",
++    "check:cron": "node scripts/cron-check.mjs",
++    "check:secrets": "node scripts/check-secrets.mjs",
++    "smoke:deployed": "node scripts/smoke-deployed.mjs",
+     "smoke:openrouter": "node scripts/openrouter-smoke.mjs"
+   },
+   "dependencies": {
+     "@supabase/supabase-js": "^2.45.4",
+-    "dotenv": "^16.4.5",
+-    "express": "^4.19.2",
+     "hono": "^4",
+     "pdf-lib": "^1.17.1"
+   },
+   "devDependencies": {
+     "@cloudflare/workers-types": "^5",
+-    "@types/express": "^4.17.21",
+     "@types/node": "^20.14.10",
+-    "tsx": "^4.19.0",
+     "typescript": "^5.5.4",
+     "vitest": "^2.0.5",
+     "wrangler": "^4"
+diff --git a/scripts/check-secrets.mjs b/scripts/check-secrets.mjs
+new file mode 100644
+index 0000000..09bbb22
+--- /dev/null
++++ b/scripts/check-secrets.mjs
+@@ -0,0 +1,112 @@
++// scripts/check-secrets.mjs — validates secrets.json BEFORE you upload it.
++//   node scripts/check-secrets.mjs [path]      (default: secrets.json)
++//   then:  npx wrangler secret bulk secrets.json
++//
++// Catches the mistakes that otherwise only show up as a broken production:
++// a template placeholder uploaded as a real value, a trailing slash or path in
++// ALLOWED_ORIGIN (CORS compares the origin EXACTLY — "https://x.github.io/"
++// never matches, and the site just silently can't call the API), a CRON_SECRET
++// short enough to guess, or a key name that is a typo of a real one.
++// Reads the file only. Never prints a value (it only ever says which KEY is
++// wrong), and never talks to the network.
++import fs from "node:fs";
++
++const file = process.argv[2] ?? "secrets.json";
++const REQUIRED = [
++  "OPENROUTER_API_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_URL",
++  "CRON_SECRET", "ALLOWED_ORIGIN", "RAHEEM_WHATSAPP_NUMBER",
++];
++// Without these three, signups still work but Raheem gets NO email alert that a
++// code is waiting (lib/notify.ts throws, the signup carries on).
++const RECOMMENDED = ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "RAHEEM_NOTIFY_EMAIL"];
++const OPTIONAL = ["SED_SH_API_KEY", "OPENROUTER_API_BASE"];
++// Set in wrangler.jsonc "vars" — uploading them as secrets too is a conflict.
++const IN_VARS = ["AVA_CONVERSATION_MODEL", "DEFAULT_AUTO_AI_MODEL", "MAX_PDF_SIZE_BYTES", "SUPABASE_PDF_BUCKET"];
++const DEAD = ["PORT", "OPENROUTER_SOCKS5_PROXY"];
++
++const errors = [];
++const warnings = [];
++const err = (m) => errors.push(m);
++const warn = (m) => warnings.push(m);
++
++if (!fs.existsSync(file)) {
++  console.error(`No ${file}. Create it:  cp secrets.example.json ${file}   then fill in the real values.`);
++  process.exit(2);
++}
++let data;
++try {
++  data = JSON.parse(fs.readFileSync(file, "utf8"));
++} catch (e) {
++  console.error(`${file} is not valid JSON: ${e.message}`);
++  process.exit(2);
++}
++if (data === null || typeof data !== "object" || Array.isArray(data)) {
++  console.error(`${file} must be a JSON object: { "NAME": "value", ... }`);
++  process.exit(2);
++}
++
++const known = new Set([...REQUIRED, ...RECOMMENDED, ...OPTIONAL]);
++for (const k of Object.keys(data)) {
++  if (IN_VARS.includes(k)) err(`${k}: already set in wrangler.jsonc "vars" — remove it from ${file}`);
++  else if (DEAD.includes(k)) err(`${k}: no longer exists (Express/SOCKS5 are gone) — remove it`);
++  else if (!known.has(k)) err(`${k}: not a variable this Worker reads — typo? (known: ${[...known].join(", ")})`);
++  else if (typeof data[k] !== "string") err(`${k}: must be a JSON string`);
++}
++
++const val = (k) => (typeof data[k] === "string" ? data[k] : undefined);
++const placeholder = (v) => /REPLACE_ME|CHANGEME|YOUR_|xxxx/i.test(v);
++
++for (const k of REQUIRED) {
++  const v = val(k);
++  if (v === undefined || v.trim() === "") err(`${k}: missing or empty (required)`);
++}
++for (const k of RECOMMENDED) {
++  const v = val(k);
++  if (v === undefined || v.trim() === "") warn(`${k}: not set — signups work, but no email alert reaches Raheem (all three of the RESEND/NOTIFY keys are needed)`);
++}
++for (const k of Object.keys(data)) {
++  const v = val(k);
++  if (v !== undefined && v.trim() !== "" && placeholder(v)) err(`${k}: still contains a template placeholder`);
++  if (v !== undefined && v !== v.trim()) err(`${k}: has leading/trailing whitespace (a pasted newline breaks auth silently)`);
++}
++
++const origin = val("ALLOWED_ORIGIN");
++if (origin && !placeholder(origin)) {
++  let u;
++  try { u = new URL(origin); } catch { err("ALLOWED_ORIGIN: not a valid URL"); }
++  if (u) {
++    if (u.protocol !== "https:") err("ALLOWED_ORIGIN: must be https://");
++    if (origin !== u.origin) err(`ALLOWED_ORIGIN: must be the bare origin with NO path or trailing slash (use "${u.origin}") — CORS matches it exactly`);
++    if (origin.includes("*")) err("ALLOWED_ORIGIN: wildcards are not supported (one exact origin)");
++  }
++}
++const sb = val("SUPABASE_URL");
++if (sb && !placeholder(sb)) {
++  try {
++    const u = new URL(sb);
++    if (u.protocol !== "https:") err("SUPABASE_URL: must be https://");
++    if (sb.endsWith("/")) err("SUPABASE_URL: remove the trailing slash");
++    if (u.pathname !== "/") err("SUPABASE_URL: must be the project root (https://<ref>.supabase.co), no path");
++  } catch { err("SUPABASE_URL: not a valid URL"); }
++}
++const cron = val("CRON_SECRET");
++if (cron && !placeholder(cron) && cron.length < 24) err("CRON_SECRET: shorter than 24 characters — generate one:  openssl rand -hex 32");
++const wa = val("RAHEEM_WHATSAPP_NUMBER");
++if (wa && !placeholder(wa) && !/^\+?[0-9][0-9 ]{6,}$/.test(wa)) warn("RAHEEM_WHATSAPP_NUMBER: expected digits (optionally with a leading +)");
++const key = val("SUPABASE_SERVICE_ROLE_KEY");
++if (key && !placeholder(key) && key.split(".").length !== 3) warn("SUPABASE_SERVICE_ROLE_KEY: doesn't look like a JWT (three dot-separated parts) — is it the service_role key, not the anon one?");
++const from = val("RESEND_FROM_EMAIL");
++if (from && !placeholder(from) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(from)) warn("RESEND_FROM_EMAIL: doesn't look like an email address");
++const to = val("RAHEEM_NOTIFY_EMAIL");
++if (to && !placeholder(to) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) warn("RAHEEM_NOTIFY_EMAIL: doesn't look like an email address");
++
++const present = Object.keys(data).filter((k) => known.has(k));
++console.log(`${file}: ${present.length} secrets present (${present.join(", ")})`);
++if (!("SED_SH_API_KEY" in data)) console.log("note: SED_SH_API_KEY not set -> PDF malware scanning will be SKIPPED (uploads are stored with pdf_scan_status='skipped').");
++for (const w of warnings) console.log(`WARN  ${w}`);
++for (const e of errors) console.log(`ERROR ${e}`);
++if (errors.length) {
++  console.log(`\n${errors.length} error(s) — do NOT upload yet.`);
++  process.exit(1);
++}
++console.log(`\nOK. Upload with:  npx wrangler secret bulk ${file}`);
+diff --git a/scripts/smoke-deployed.mjs b/scripts/smoke-deployed.mjs
+new file mode 100644
+index 0000000..047f018
+--- /dev/null
++++ b/scripts/smoke-deployed.mjs
+@@ -0,0 +1,140 @@
++// scripts/smoke-deployed.mjs — smoke test for a DEPLOYED Worker (Stage 7, step 4).
++//
++//   node scripts/smoke-deployed.mjs https://ava-onboarding-backend.<you>.workers.dev \
++//        --origin https://<you>.github.io
++//   add  --cron-secret <CRON_SECRET>  --run-cron   to also run the two jobs once
++//   add  --with-chat                                to also make ONE real /chat call
++//
++// Result label if everything passes against the real URL: "verified on Cloudflare"
++// — and ONLY for what is checked here. (Everything run before deploying, vitest and
++// the scripts/*-check.mjs files, is "passed locally".)
++//
++// DEFAULT RUN IS SAFE: it never writes a row, never sends a message, never spends
++// OpenRouter credit, never touches Meta. Every request is either rejected before any
++// write (401/405/400/404) or a read-only lookup for a number that can't exist:
++//   - /lookup-signup for a nonsense number  -> a real Supabase READ from Cloudflare's
++//     network (proves SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are right)
++//   - /upload-pdf with a made-up phone_number_id and a junk file -> real multipart
++//     parsing + a Supabase READ, then 404 BEFORE anything is stored or scanned
++// Opt-in, because they are NOT read-only:
++//   --run-cron   runs activate-pending + sweep-pdf-scans for real, on real rows (a
++//                row you set to 'verified_ready' WILL be activated, a scan_pending
++//                row WILL be resolved) — exactly what the schedule would do anyway.
++//   --with-chat  one POST /chat ("hi", no contact_number, so no Supabase write): a
++//                real OpenRouter call from Cloudflare's network, costs a fraction of
++//                a cent. This is the check that proves OpenRouter accepts Cloudflare.
++//
++// NOT covered, and can't be from outside: whether Cloudflare's scheduler really fires
++// the two Cron Triggers (watch `npx wrangler tail`, or Dashboard -> Worker ->
++// Observability / Triggers), the SetupLock Durable Object (POST /complete-setup writes
++// real rows and calls Meta, so it is not smoke-tested here), and CPU-time limits under
++// real traffic (watch for error 1102 in the logs).
++const args = process.argv.slice(2);
++const flag = (n) => args.includes(n);
++const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
++const base = (args.find((a) => /^https?:\/\//.test(a)) ?? "").replace(/\/$/, "");
++const origin = (opt("--origin", process.env.ORIGIN ?? "")).replace(/\/$/, "");
++const cronSecret = opt("--cron-secret", process.env.CRON_SECRET ?? "");
++const runCron = flag("--run-cron");
++const withChat = flag("--with-chat");
++
++if (!base || !origin) {
++  console.error("Usage: node scripts/smoke-deployed.mjs <https://worker-url> --origin <https://your.github.io> [--cron-secret S --run-cron] [--with-chat]");
++  process.exit(2);
++}
++if (runCron && !cronSecret) {
++  console.error("--run-cron needs --cron-secret <CRON_SECRET> (or the CRON_SECRET env var).");
++  process.exit(2);
++}
++
++const results = [];
++const check = (name, ok, detail = "") => {
++  results.push(ok);
++  console.log(`[${ok ? "PASS" : "FAIL"}] ${name}${detail ? " - " + detail : ""}`);
++};
++const call = async (path, init = {}) => {
++  const t0 = Date.now();
++  try {
++    const res = await fetch(base + path, { ...init, signal: AbortSignal.timeout(60_000) });
++    const text = await res.text();
++    let json = null;
++    try { json = JSON.parse(text); } catch {}
++    return { status: res.status, text, json, ms: Date.now() - t0, h: (k) => res.headers.get(k) };
++  } catch (e) {
++    return { status: 0, text: String(e), json: null, ms: Date.now() - t0, h: () => null };
++  }
++};
++const short = (t) => (t.length > 120 ? t.slice(0, 120) + "…" : t);
++
++console.log(`Target ${base} | origin ${origin}${runCron ? " | --run-cron" : ""}${withChat ? " | --with-chat" : ""}\n`);
++
++console.log("== 1. alive + CORS ==");
++let r = await call("/health");
++check("GET /health -> 200 { ok: true }", r.status === 200 && r.json?.ok === true, `${r.status} ${short(r.text)} (${r.ms}ms)`);
++if (r.status === 0) {
++  console.log("\nCannot reach the Worker at all — wrong URL, or not deployed yet. Stopping.");
++  process.exit(1);
++}
++r = await call("/complete-setup", { method: "OPTIONS", headers: { Origin: origin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" } });
++check("preflight from your site's origin -> 204 + Access-Control-Allow-Origin == that origin", r.status === 204 && r.h("access-control-allow-origin") === origin, `${r.status} allow-origin=${r.h("access-control-allow-origin")}`);
++r = await call("/complete-setup", { method: "OPTIONS", headers: { Origin: "https://evil.example", "Access-Control-Request-Method": "POST" } });
++check("preflight from another origin is NOT granted", r.h("access-control-allow-origin") !== "https://evil.example" && r.h("access-control-allow-origin") !== "*", `allow-origin=${r.h("access-control-allow-origin")}`);
++
++console.log("\n== 2. reads from Supabase (proves SUPABASE_URL + service key, from Cloudflare's network) ==");
++r = await call("/lookup-signup?contact_number=%2B000000000000", { headers: { Origin: origin } });
++check("GET /lookup-signup, number that can't exist -> 200 { found: false }", r.status === 200 && r.json?.found === false, `${r.status} ${short(r.text)} (${r.ms}ms)` + (r.status === 500 ? "  <- 500 here usually means SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY is wrong" : ""));
++check("…and that response carries the CORS header for your origin", r.h("access-control-allow-origin") === origin);
++r = await call("/lookup-signup", { headers: { Origin: origin } });
++check("GET /lookup-signup with no contact_number -> 400", r.status === 400);
++
++console.log("\n== 3. multipart parsing on the real platform (no row can match, so nothing is stored) ==");
++const fd = new FormData();
++fd.append("phone_number_id", "smoke-test-no-such-id");
++fd.append("file", new File([new TextEncoder().encode("%PDF-1.4 smoke junk, never stored")], "smoke.pdf", { type: "application/pdf" }));
++r = await call("/upload-pdf", { method: "POST", headers: { Origin: origin }, body: fd });
++check("POST /upload-pdf, unknown phone_number_id -> 404 (formData parsed + Supabase read worked, nothing stored)", r.status === 404, `${r.status} ${short(r.text)} (${r.ms}ms)` + (r.status === 500 ? "  <- 500: Supabase read failed" : /1102|exceeded resource limits/i.test(r.text) ? "  <- Cloudflare error 1102: CPU/memory limit (lower MAX_PDF_SIZE_BYTES)" : ""));
++const fd2 = new FormData();
++fd2.append("phone_number_id", "smoke-test-no-such-id");
++r = await call("/upload-pdf", { method: "POST", headers: { Origin: origin }, body: fd2 });
++check("POST /upload-pdf with no file -> 400 'file is required'", r.status === 400 && r.json?.error === "file is required", `${r.status} ${short(r.text)}`);
++
++console.log("\n== 4. methods + auth are enforced ==");
++r = await call("/chat", { headers: { Origin: origin } });
++check("GET /chat -> 405", r.status === 405);
++r = await call("/complete-setup", { headers: { Origin: origin } });
++check("GET /complete-setup -> 405", r.status === 405);
++r = await call("/cron/activate-pending");
++check("GET /cron/activate-pending with no secret -> 401", r.status === 401, String(r.status));
++r = await call("/cron/sweep-pdf-scans?secret=definitely-wrong");
++check("GET /cron/sweep-pdf-scans with a wrong secret -> 401", r.status === 401, String(r.status));
++r = await call("/chat", { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: "{not json" });
++check("POST /chat with malformed JSON -> 400 (not a 500)", r.status === 400, `${r.status} ${short(r.text)}`);
++r = await call("/does-not-exist");
++check("unknown path -> 404, not a crash", r.status === 404, String(r.status));
++
++if (runCron) {
++  console.log("\n== 5. (--run-cron) the two manual cron routes, FOR REAL ==");
++  for (const job of ["activate-pending", "sweep-pdf-scans"]) {
++    r = await call(`/cron/${job}`, { headers: { Authorization: `Bearer ${cronSecret}` } });
++    check(`GET /cron/${job} with the real secret -> 200 + summary`, r.status === 200 && typeof r.json?.checked === "number", `${r.status} ${short(r.text)} (${r.ms}ms)`);
++  }
++}
++
++if (withChat) {
++  console.log("\n== 6. (--with-chat) one real OpenRouter call from Cloudflare's network ==");
++  r = await call("/chat", {
++    method: "POST",
++    headers: { Origin: origin, "Content-Type": "application/json" },
++    body: JSON.stringify({ conversation_history: [], user_message: "hi" }),
++  });
++  check("POST /chat 'hi' -> 200 with a non-empty reply", r.status === 200 && typeof r.json?.reply === "string" && r.json.reply.length > 0 && r.json.done === false,
++    `${r.status} ${short(r.text)} (${r.ms}ms)` +
++      (r.status === 502 ? "  <- 502 = the OpenRouter call failed (key/credit/blocked?)" : r.status === 500 ? "  <- 500: a secret is missing (see the error text)" : ""));
++}
++
++const pass = results.filter(Boolean).length;
++console.log(`\n== SUMMARY == ${pass}/${results.length} checks passed against ${base}`);
++if (pass === results.length) {
++  console.log("Label: \"verified on Cloudflare\" — for exactly the checks above" + (runCron && withChat ? "." : `. Not yet run: ${[!withChat && "--with-chat (OpenRouter from Cloudflare)", !runCron && "--run-cron (the two jobs)"].filter(Boolean).join(", ")}.`));
++}
++process.exit(pass === results.length ? 0 : 1);
+diff --git a/scripts/smoke-selfcheck.mjs b/scripts/smoke-selfcheck.mjs
+new file mode 100644
+index 0000000..176188f
+--- /dev/null
++++ b/scripts/smoke-selfcheck.mjs
+@@ -0,0 +1,83 @@
++// scripts/smoke-selfcheck.mjs — proves scripts/smoke-deployed.mjs itself works,
++// by pointing it at a LOCAL `wrangler dev` Worker (mock Supabase + mock OpenRouter).
++// You will run smoke-deployed.mjs once, against the real URL, at the most
++// stressful moment of the migration; this makes sure a bug in the script
++// doesn't cost you that time. Run: node scripts/smoke-selfcheck.mjs
++// Result label: "passed locally". It says nothing about real Cloudflare.
++import { spawn } from "node:child_process";
++import { startMockSupabase } from "./mock-supabase.mjs";
++import { startMockOpenRouter } from "./mock-openrouter.mjs";
++import { startWorker } from "./_worker.mjs";
++
++const ORIGIN = "https://boltane.github.io";
++const SECRET = "selfcheck-cron-secret-0123456789abcdef";
++const results = [];
++const check = (name, ok, detail = "") => {
++  results.push(ok);
++  console.log(`[${ok ? "PASS" : "FAIL"}] ${name}${detail ? " - " + detail : ""}`);
++};
++// ASYNC spawn on purpose: the mock Supabase / OpenRouter servers live in THIS process, so a
++// blocking spawnSync would freeze their event loop and every Worker->mock call would hang.
++const smoke = (url, extra = []) =>
++  new Promise((resolve) => {
++    const child = spawn("node", ["scripts/smoke-deployed.mjs", url, ...extra], { stdio: ["ignore", "pipe", "pipe"] });
++    let stdout = "", stderr = "";
++    child.stdout.on("data", (d) => (stdout += d));
++    child.stderr.on("data", (d) => (stderr += d));
++    const timer = setTimeout(() => child.kill("SIGKILL"), 120_000);
++    child.on("close", (status) => { clearTimeout(timer); resolve({ status, stdout, stderr }); });
++  });
++
++const sb = await startMockSupabase({ port: 8799, delayMs: 10, autoCreate: false });
++const or = await startMockOpenRouter({ port: 8798, delayMs: 20 });
++let worker;
++let code = 1;
++try {
++  worker = await startWorker({
++    port: 8788,
++    vars: {
++      SUPABASE_URL: sb.url, SUPABASE_SERVICE_ROLE_KEY: "k", ALLOWED_ORIGIN: ORIGIN,
++      CRON_SECRET: SECRET, OPENROUTER_API_KEY: "or-key", OPENROUTER_API_BASE: or.url,
++      RAHEEM_WHATSAPP_NUMBER: "+15550001111",
++    },
++  });
++
++  let r = await smoke(worker.url, ["--origin", ORIGIN]);
++  let m = /(\d+)\/(\d+) checks passed/.exec(r.stdout);
++  check("default (read-only) run: exit 0, every check passes", r.status === 0 && m && m[1] === m[2], `${m?.[0]}\n${r.status !== 0 ? r.stdout.slice(-1500) : ""}`);
++  check("…and it wrote nothing (no rows, no storage objects) and made no OpenRouter call",
++    (await (await fetch(`${sb.url}/__rows`)).json()).length === 0 &&
++      Object.keys(await (await fetch(`${sb.url}/__storage`)).json()).length === 0 &&
++      (await (await fetch(`${or.url}/__requests`)).json()).length === 0);
++
++  r = await smoke(worker.url, ["--origin", ORIGIN, "--cron-secret", SECRET, "--run-cron", "--with-chat"]);
++  m = /(\d+)\/(\d+) checks passed/.exec(r.stdout);
++  check("--run-cron --with-chat: exit 0, every check passes", r.status === 0 && m && m[1] === m[2], `${m?.[0]}\n${r.status !== 0 ? r.stdout.slice(-1500) : ""}`);
++  const orReqs = await (await fetch(`${or.url}/__requests`)).json();
++  check("--with-chat made exactly ONE OpenRouter call (and nothing before it did)", orReqs.length === 1, String(orReqs.length));
++  check("the final label names what was verified", /verified on Cloudflare/.test(r.stdout));
++
++  r = await smoke(worker.url, ["--origin", "https://not-the-allowed-origin.example"]);
++  check("wrong --origin is CAUGHT: exit 1 and the CORS check is the one that FAILs", r.status === 1 && /\[FAIL\] preflight from your site's origin/.test(r.stdout));
++
++  r = await smoke(worker.url, ["--origin", ORIGIN, "--cron-secret", "wrong", "--run-cron"]);
++  check("--run-cron with a wrong secret is CAUGHT: exit 1", r.status === 1 && /\[FAIL\] GET \/cron\/activate-pending with the real secret/.test(r.stdout));
++
++  r = await smoke("http://127.0.0.1:1", ["--origin", ORIGIN]);
++  check("unreachable URL: exits 1 right away with a clear message (not a stack trace)", r.status === 1 && /Cannot reach the Worker/.test(r.stdout), r.stdout.slice(0, 200));
++
++  r = await smoke(worker.url, []);
++  check("missing --origin: usage message, exit 2", r.status === 2 && /Usage:/.test(r.stderr));
++
++  const pass = results.filter(Boolean).length;
++  console.log(`\n== SUMMARY == ${pass}/${results.length} checks passed`);
++  code = pass === results.length ? 0 : 1;
++} catch (e) {
++  console.error("selfcheck crashed:", e);
++  if (worker) console.error(worker.getLog().slice(-2000));
++} finally {
++  if (worker) await worker.stop();
++  await sb.close();
++  await or.close();
++}
++process.exit(code);
+diff --git a/secrets.example.json b/secrets.example.json
+new file mode 100644
+index 0000000..52dcc26
+--- /dev/null
++++ b/secrets.example.json
+@@ -0,0 +1,11 @@
++{
++  "OPENROUTER_API_KEY": "REPLACE_ME",
++  "SUPABASE_SERVICE_ROLE_KEY": "REPLACE_ME",
++  "SUPABASE_URL": "https://REPLACE_ME.supabase.co",
++  "CRON_SECRET": "REPLACE_ME (generate: openssl rand -hex 32)",
++  "ALLOWED_ORIGIN": "https://REPLACE_ME.github.io",
++  "RAHEEM_WHATSAPP_NUMBER": "REPLACE_ME",
++  "RESEND_API_KEY": "REPLACE_ME",
++  "RESEND_FROM_EMAIL": "onboarding@REPLACE_ME",
++  "RAHEEM_NOTIFY_EMAIL": "REPLACE_ME@example.com"
++}
+diff --git a/server.ts b/server.ts
+deleted file mode 100644
+index 167ef82..0000000
+--- a/server.ts
++++ /dev/null
+@@ -1,84 +0,0 @@
+-// server.ts
+-//
+-// Render entrypoint. Vercel ran each file under api/ as its own isolated
+-// serverless function; Render runs one persistent process, so this file
+-// wires all six of them into routes on a single Express app instead.
+-//
+-// Deliberately NOT a rewrite: every handler under api/ still has the
+-// exact same (req, res) signature and internal req.method/OPTIONS
+-// handling it had for Vercel (see each file's own CORS/method checks) —
+-// this file only does routing. That was a one-line type-import swap per
+-// file (VercelRequest/VercelResponse -> express's Request/Response,
+-// which are structurally close enough that no handler logic changed).
+-//
+-// Routes are mounted with app.all() rather than app.post()/app.get(),
+-// specifically so each handler's own internal OPTIONS/method-not-allowed
+-// logic keeps working unchanged — Express would otherwise never route an
+-// OPTIONS preflight request to a route registered with app.post() alone.
+-//
+-// express.json() below only engages for Content-Type: application/json
+-// (its default matcher) — POST /upload-pdf sends multipart/form-data, so
+-// this middleware leaves that request's body stream untouched for
+-// lib/multipart.ts's busboy parser to read directly off req.
+-//
+-// dotenv loads FIRST, before any handler import below — several lib
+-// files read process.env at module load time, not per-request (e.g.
+-// lib/cors.ts's ALLOWED_ORIGIN is a top-level const), so those imports
+-// must run after the env is populated or they'd permanently capture
+-// empty values. In production on Render this import is a harmless
+-// no-op — env vars are set directly in the dashboard, no .env.local
+-// file exists there to load.
+-// require(), not import, deliberately: TypeScript/bundler ESM->CJS
+-// transforms are allowed to hoist import statements above plain code —
+-// a plain require() call has no such ambiguity, it always runs exactly
+-// where it's written. That guarantee is the entire point of this line.
+-require("dotenv").config({ path: ".env.local" });
+-
+-import express from "express";
+-
+-import { asyncHandler, errorMiddleware } from "./lib/asyncHandler";
+-import chatHandler from "./api/chat";
+-import completeSetupHandler from "./api/complete-setup";
+-import lookupSignupHandler from "./api/lookup-signup";
+-import uploadPdfHandler from "./api/upload-pdf";
+-import activatePendingHandler from "./api/cron/activate-pending";
+-import sweepPdfScansHandler from "./api/cron/sweep-pdf-scans";
+-
+-const app = express();
+-// Express's json() defaults to a 100kb body limit — too small for a
+-// long conversation_history payload on later chat turns. Vercel's own
+-// serverless functions defaulted to ~4.5MB; matching that here so a
+-// long-running Ava conversation doesn't start silently failing to
+-// parse partway through.
+-app.use(express.json({ limit: "4.5mb" }));
+-
+-// asyncHandler(): Express 4 doesn't catch rejected promises from async
+-// handlers — without it, one unexpected throw crashes the whole process.
+-app.all("/chat", asyncHandler(chatHandler));
+-app.all("/complete-setup", asyncHandler(completeSetupHandler));
+-app.all("/lookup-signup", asyncHandler(lookupSignupHandler));
+-app.all("/upload-pdf", asyncHandler(uploadPdfHandler));
+-app.all("/cron/activate-pending", asyncHandler(activatePendingHandler));
+-app.all("/cron/sweep-pdf-scans", asyncHandler(sweepPdfScansHandler));
+-
+-// Render's health check + what an external keep-alive/monitor pings.
+-// Deliberately does nothing but confirm the process is up — no Supabase
+-// call here, so it stays cheap and can't itself contribute to hitting
+-// any downstream rate limit.
+-app.get("/health", (_req, res) => {
+-  res.status(200).json({ ok: true });
+-});
+-
+-// Must come after all routes: turns any forwarded error (including
+-// express.json's own body-parse errors) into a JSON response.
+-app.use(errorMiddleware);
+-
+-// Last-resort safety net: log instead of dying on a stray rejection.
+-process.on("unhandledRejection", (reason) => {
+-  console.error("Unhandled promise rejection:", reason);
+-});
+-
+-const port = Number(process.env.PORT) || 3000;
+-app.listen(port, () => {
+-  console.log(`ava-backend listening on port ${port}`);
+-});
+diff --git a/src/index.ts b/src/index.ts
+index 1fae5f1..702dbbe 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1,26 +1,19 @@
+ // src/index.ts
+ //
+-// New Cloudflare Workers entry point, built up stage by stage alongside
+-// server.ts (which stays untouched and remains the live, Termux-hosted
+-// production entry point until Stage 7's cutover — see
+-// ../ava-migration-plan/00-overview.md). Nothing here is reachable by
+-// real users yet.
++// The Worker entry point (wrangler.jsonc "main"). One Hono `app` serves every
++// HTTP route; the default export also carries scheduled() for Cloudflare Cron
++// Triggers, and the SetupLock Durable Object class is exported from here so
++// the LOCK binding resolves. Routes: POST /chat, POST /complete-setup,
++// GET /lookup-signup, POST /upload-pdf, the manual GET /cron/* fallbacks
++// (CRON_SECRET), and GET /health.
+ //
+-// CORS below is a placeholder — Stage 2 replaces it with the real
+-// ALLOWED_ORIGIN-driven config currently in lib/cors.ts's applyCors().
+-// Real routes get added to this file stage by stage as each becomes
+-// ready (Stage 2: none yet, data-layer only; Stage 3 (done) adds
+-// POST /complete-setup + the SetupLock Durable Object export; Stage 4
+-// (done) adds POST /chat; Stage 5 (done) adds POST /upload-pdf; Stage 6
+-// (done) adds GET /lookup-signup, the manual /cron/* routes and the
+-// scheduled() export; Stage 7 wires
+-// everything into one app and retires server.ts).
++// Replaced the Express entry point (server.ts, Render/Termux) in Stage 7.
++// That one's asyncHandler/errorMiddleware/applyCors are the app.onError and
++// cors() middleware below; its express.json({ limit: "4.5mb" }) is the
++// body cap in lib/httpBody.ts; busboy is Request.formData() in
++// api/upload-pdf.ts.
+ import { Hono } from "hono";
+ import { cors } from "hono/cors";
+-import { estimateTokens } from "../lib/tokenBudget";
+-import { createPhoneMasker } from "../lib/piiMasking";
+-import { buildExtractionSystemPrompt } from "../lib/systemPrompt";
+-import { generateOtpCode } from "../lib/otpCode";
+ import completeSetupHandler from "../api/complete-setup";
+ import chatHandler from "../api/chat";
+ import uploadPdfHandler from "../api/upload-pdf";
+@@ -36,20 +29,17 @@ export { SetupLock } from "./setupLock";
+ 
+ export const app = new Hono<{ Bindings: Env }>();
+ 
+-// Matches lib/cors.ts's applyCors() exactly: no Access-Control-Allow-
+-// Origin header at all when ALLOWED_ORIGIN is unset (fails closed —
+-// NOT an origin-echo fallback, which would be a real behavior change).
+-// Verified against Hono's actual cors() source, not assumed: it only
+-// sets the header when this function returns a truthy value, and
+-// (separately) only appends Vary: Origin / sets Allow-Methods /
+-// Allow-Headers because `origin` here is a function, not the literal
+-// string "*" — same condition the library uses to decide "this isn't
+-// a wildcard-open config." One acknowledged, low-risk difference from
+-// the original: Hono only sends Allow-Methods/Allow-Headers on the
+-// OPTIONS/204 preflight response, not on every response the way
+-// applyCors() did — harmless per the CORS spec (browsers only consult
+-// those two on preflight), but a real difference, not silently
+-// glossed over.
++// CORS (replaces lib/cors.ts's applyCors()): no Access-Control-Allow-Origin
++// header at all when ALLOWED_ORIGIN is unset — fails closed, NOT an
++// origin-echo fallback. Verified against Hono's actual cors() source, not
++// assumed: it only sets the header when this function returns a truthy
++// value, and (separately) only appends Vary: Origin / sets Allow-Methods /
++// Allow-Headers because `origin` here is a function, not the literal string
++// "*". One acknowledged, harmless difference from applyCors(): Hono sends
++// Allow-Methods/Allow-Headers only on the OPTIONS/204 preflight, not on
++// every response — browsers only consult those two on preflight. GET
++// (/lookup-signup) and multipart POST (/upload-pdf) are CORS "simple"
++// requests, so they need no preflight and no entry in allowMethods.
+ app.use(
+   "*",
+   cors({
+@@ -59,9 +49,9 @@ app.use(
+   })
+ );
+ 
+-// Replaces server.ts's errorMiddleware/asyncHandler (Workers has no
+-// "unhandled rejection kills the process" failure mode, so those two
+-// are not ported — this only guarantees a JSON body, no detail leak).
++// Replaces the old errorMiddleware/asyncHandler (Workers has no "unhandled
++// rejection kills the process" failure mode, so only the part that matters
++// is kept — a JSON 500 body, no detail leak).
+ // The CORS middleware above has already set its headers by the time a
+ // handler throws, so the browser sees the real 500, not a CORS error.
+ app.onError((err, c) => {
+@@ -91,44 +81,10 @@ app.all("/lookup-signup", lookupSignupHandler);
+ app.all("/cron/activate-pending", activatePendingHandler);
+ app.all("/cron/sweep-pdf-scans", sweepPdfScansHandler);
+ 
+-// Proof the Worker boots and routes correctly. Not the same route as
+-// server.ts's /health (that one stays serving real Render/Termux
+-// traffic) — this is this build's own smoke-test route.
++// Liveness check: confirms the Worker is up and routing, nothing more — no
++// Supabase call, so it is cheap and can't contribute to any downstream limit.
+ app.get("/health", (c) => c.json({ ok: true }));
+ 
+-// Stage 1 self-test: proves these specific files don't just type-check
+-// (tsc doesn't touch the runtime) and don't just pass under Node
+-// (vitest doesn't either) but actually import and execute correctly
+-// under real workerd. Covers 4 of the 6 standalone files; sanitize.ts
+-// and storeRow.ts are left to be exercised for real in Stage 4 (chat.ts)
+-// and Stage 6 (cron/activate-pending.ts) rather than fed artificial
+-// fixtures here just to tick a box — both are already confirmed
+-// type-clean under tsconfig.workers.json in the meantime. Remove this
+-// route once those stages land and exercise the same files for real.
+-app.get("/selftest", (c) => {
+-  const tokens = estimateTokens("hello from a real Workers isolate");
+-  const masker = createPhoneMasker();
+-  const masked = masker.mask("call me at +963900000000, thanks");
+-  const restored = masker.restore(masked);
+-  const prompt = buildExtractionSystemPrompt();
+-  const otp = generateOtpCode(); // exercises the bare `crypto` import under real workerd
+-
+-  const ok =
+-    typeof tokens === "number" &&
+-    tokens > 0 &&
+-    masked.includes("+963900000000") === false &&
+-    restored.includes("+963900000000") &&
+-    typeof prompt === "string" &&
+-    prompt.length > 0 &&
+-    typeof otp === "string" &&
+-    otp.length > 0;
+-
+-  return c.json(
+-    { ok, tokens, masked, restored, otpLength: otp.length, promptLength: prompt.length },
+-    ok ? 200 : 500
+-  );
+-});
+-
+ // A Worker exports BOTH entry points from one default object: fetch() for
+ // HTTP (the Hono app, incl. the manual /cron/* routes) and scheduled() for
+ // Cloudflare Cron Triggers. `app` is also a named export so tests can drive
+diff --git a/tests/asyncHandler.test.ts b/tests/asyncHandler.test.ts
+deleted file mode 100644
+index 7485e3f..0000000
+--- a/tests/asyncHandler.test.ts
++++ /dev/null
+@@ -1,77 +0,0 @@
+-// tests/asyncHandler.test.ts
+-import { describe, it, expect, vi, afterEach } from "vitest";
+-import type { Request, Response } from "express";
+-import { asyncHandler, errorMiddleware } from "../lib/asyncHandler";
+-import { applyCors } from "../lib/cors";
+-
+-function makeRes() {
+-  const res: Partial<Response> & { _status?: number; _json?: unknown; headersSent?: boolean } = {};
+-  res.status = vi.fn((c: number) => { res._status = c; return res as Response; });
+-  res.json = vi.fn((b: unknown) => { res._json = b; return res as Response; });
+-  res.setHeader = vi.fn();
+-  return res as Response & { _status?: number; _json?: unknown };
+-}
+-
+-afterEach(() => { delete process.env.ALLOWED_ORIGIN; vi.restoreAllMocks(); });
+-
+-describe("asyncHandler", () => {
+-  it("forwards a rejected async handler to next() instead of leaking an unhandled rejection", async () => {
+-    const boom = new Error("boom");
+-    const next = vi.fn();
+-    const wrapped = asyncHandler(async () => { throw boom; });
+-    wrapped({} as Request, makeRes(), next);
+-    await new Promise((r) => setTimeout(r, 0));
+-    expect(next).toHaveBeenCalledWith(boom);
+-  });
+-
+-  it("forwards a synchronous throw too", async () => {
+-    const next = vi.fn();
+-    asyncHandler(() => { throw new Error("sync"); })({} as Request, makeRes(), next);
+-    await new Promise((r) => setTimeout(r, 0));
+-    expect(next).toHaveBeenCalledTimes(1);
+-  });
+-
+-  it("does not call next() when the handler succeeds", async () => {
+-    const next = vi.fn();
+-    asyncHandler(async () => {})({} as Request, makeRes(), next);
+-    await new Promise((r) => setTimeout(r, 0));
+-    expect(next).not.toHaveBeenCalled();
+-  });
+-});
+-
+-describe("errorMiddleware", () => {
+-  it("unknown error -> 500 JSON without leaking details", () => {
+-    vi.spyOn(console, "error").mockImplementation(() => {});
+-    const res = makeRes();
+-    errorMiddleware(new Error("secret db detail"), {} as Request, res, vi.fn());
+-    expect(res._status).toBe(500);
+-    expect(JSON.stringify(res._json)).not.toContain("secret");
+-  });
+-
+-  it("body-parser style 4xx errors keep their status", () => {
+-    const res = makeRes();
+-    errorMiddleware(Object.assign(new Error("x"), { status: 413 }), {} as Request, res, vi.fn());
+-    expect(res._status).toBe(413);
+-    const res2 = makeRes();
+-    errorMiddleware(Object.assign(new Error("x"), { status: 400 }), {} as Request, res2, vi.fn());
+-    expect(res2._status).toBe(400);
+-  });
+-
+-  it("delegates to next() if headers were already sent", () => {
+-    const res = makeRes();
+-    (res as unknown as { headersSent: boolean }).headersSent = true;
+-    const next = vi.fn();
+-    const err = new Error("late");
+-    errorMiddleware(err, {} as Request, res, next);
+-    expect(next).toHaveBeenCalledWith(err);
+-  });
+-});
+-
+-describe("applyCors reads ALLOWED_ORIGIN per request (not at import time)", () => {
+-  it("picks up a value set AFTER the module was imported", () => {
+-    process.env.ALLOWED_ORIGIN = "https://late.example";
+-    const res = makeRes();
+-    applyCors(res);
+-    expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Origin", "https://late.example");
+-  });
+-});
+diff --git a/tests/cronAuth.test.ts b/tests/cronAuth.test.ts
+index 38ad86c..9e46065 100644
+--- a/tests/cronAuth.test.ts
++++ b/tests/cronAuth.test.ts
+@@ -1,30 +1,36 @@
+ // tests/cronAuth.test.ts
++// Stage 7: ported from the Express `Request` shape to a Web `Request` when
++// isCronAuthorized() (Express) was deleted. Same four tests, same intent
++// ("rejects ... array" is now a repeated ?secret=a&secret=b, which is how an
++// array reaches the check on a real request).
+ import { describe, it, expect, afterEach } from "vitest";
+-import type { Request } from "express";
+-import { isCronAuthorized } from "../lib/cronAuth";
++import { isCronAuthorizedRequest } from "../lib/cronAuth";
+ 
+-const req = (o: { auth?: string; secret?: unknown }) =>
+-  ({ headers: { authorization: o.auth }, query: { secret: o.secret } }) as unknown as Request;
++const req = (o: { auth?: string; secret?: string | string[] }) => {
++  const url = new URL("http://x/cron/job");
++  for (const s of o.secret === undefined ? [] : [o.secret].flat()) url.searchParams.append("secret", s);
++  return new Request(url, { headers: o.auth ? { authorization: o.auth } : {} });
++};
+ 
+ afterEach(() => { delete process.env.CRON_SECRET; });
+ 
+-describe("isCronAuthorized", () => {
++describe("isCronAuthorizedRequest", () => {
+   it("fails closed when CRON_SECRET is unset", () => {
+-    expect(isCronAuthorized(req({ auth: "Bearer x", secret: "x" }))).toBe(false);
++    expect(isCronAuthorizedRequest(req({ auth: "Bearer x", secret: "x" }))).toBe(false);
+   });
+   it("accepts the Bearer header", () => {
+     process.env.CRON_SECRET = "s3cret";
+-    expect(isCronAuthorized(req({ auth: "Bearer s3cret" }))).toBe(true);
++    expect(isCronAuthorizedRequest(req({ auth: "Bearer s3cret" }))).toBe(true);
+   });
+   it("accepts ?secret=", () => {
+     process.env.CRON_SECRET = "s3cret";
+-    expect(isCronAuthorized(req({ secret: "s3cret" }))).toBe(true);
++    expect(isCronAuthorizedRequest(req({ secret: "s3cret" }))).toBe(true);
+   });
+-  it("rejects wrong / different-length / array / missing values without throwing", () => {
++  it("rejects wrong / different-length / repeated / missing values without throwing", () => {
+     process.env.CRON_SECRET = "s3cret";
+-    expect(isCronAuthorized(req({ auth: "Bearer nope" }))).toBe(false);
+-    expect(isCronAuthorized(req({ secret: "s3cre" }))).toBe(false);
+-    expect(isCronAuthorized(req({ secret: ["s3cret", "s3cret"] }))).toBe(false);
+-    expect(isCronAuthorized(req({}))).toBe(false);
++    expect(isCronAuthorizedRequest(req({ auth: "Bearer nope" }))).toBe(false);
++    expect(isCronAuthorizedRequest(req({ secret: "s3cre" }))).toBe(false);
++    expect(isCronAuthorizedRequest(req({ secret: ["s3cret", "s3cret"] }))).toBe(false);
++    expect(isCronAuthorizedRequest(req({}))).toBe(false);
+   });
+ });
+diff --git a/tests/httpBody.test.ts b/tests/httpBody.test.ts
+new file mode 100644
+index 0000000..b1c4688
+--- /dev/null
++++ b/tests/httpBody.test.ts
+@@ -0,0 +1,132 @@
++// tests/httpBody.test.ts — Stage 7. The 4.5mb JSON body cap that server.ts's
++// express.json({ limit: "4.5mb" }) enforced and the Worker port had silently
++// dropped (req.text() has no limit). Unit tests on readJsonBody + the same
++// behavior seen from the real routes (/chat and /complete-setup).
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++
++vi.mock("../lib/supabase", () => ({
++  findPendingSignupByContactNumber: vi.fn(),
++  updatePendingSignup: vi.fn().mockResolvedValue(undefined),
++}));
++vi.mock("../lib/otpHandoff", () => ({ triggerOtpHandoff: vi.fn() }));
++
++import { app } from "../src/index";
++import { MAX_JSON_BODY_BYTES, readJsonBody } from "../lib/httpBody";
++import type { Env } from "../src/env";
++import { makeLockNamespace } from "./helpers/lock";
++
++const ORIGIN = "https://boltane.github.io";
++const req = (body: RequestInit["body"], headers: Record<string, string> = {}) =>
++  new Request("http://x/", { method: "POST", body, headers });
++
++// a JSON document of exactly `n` bytes: {"a":"xxxx..."}
++const jsonOfSize = (n: number) => `{"a":"${"x".repeat(n - 8)}"}`;
++
++describe("readJsonBody", () => {
++  it("the default cap equals body-parser's '4.5mb'", () => {
++    expect(MAX_JSON_BODY_BYTES).toBe(4718592);
++  });
++
++  it("normal body -> parsed value", async () => {
++    expect(await readJsonBody(req('{"a":1}'))).toEqual({ ok: true, value: { a: 1 } });
++  });
++
++  it("empty / whitespace / no body -> {}", async () => {
++    expect(await readJsonBody(req(""))).toEqual({ ok: true, value: {} });
++    expect(await readJsonBody(req("  \n "))).toEqual({ ok: true, value: {} });
++    expect(await readJsonBody(new Request("http://x/", { method: "POST" }))).toEqual({ ok: true, value: {} });
++  });
++
++  it("malformed JSON -> { ok:false } with NO tooLarge flag (a 400, not a 413)", async () => {
++    const r = await readJsonBody(req("{nope"));
++    expect(r).toEqual({ ok: false });
++    expect((r as { tooLarge?: boolean }).tooLarge).toBeUndefined();
++  });
++
++  it("exactly at the cap is accepted; one byte over is refused", async () => {
++    expect((await readJsonBody(req(jsonOfSize(1000)), 1000)).ok).toBe(true);
++    expect(await readJsonBody(req(jsonOfSize(1001)), 1000)).toEqual({ ok: false, tooLarge: true });
++  });
++
++  it("multi-byte UTF-8 is counted in BYTES, not characters, and decodes intact", async () => {
++    const arabic = JSON.stringify({ m: "مرحبا بكم" }); // 2 bytes per letter
++    const bytes = new TextEncoder().encode(arabic).length;
++    expect(bytes).toBeGreaterThan(arabic.length);
++    expect(await readJsonBody(req(arabic), bytes)).toEqual({ ok: true, value: { m: "مرحبا بكم" } });
++    expect(await readJsonBody(req(arabic), bytes - 1)).toEqual({ ok: false, tooLarge: true });
++  });
++
++  it("a multi-byte character split across chunks still decodes correctly", async () => {
++    const all = new TextEncoder().encode(JSON.stringify({ m: "مرحبا" }));
++    const mid = all.length - 4; // lands inside a 2-byte letter
++    const body = new ReadableStream<Uint8Array>({
++      start(c) { c.enqueue(all.slice(0, mid)); c.enqueue(all.slice(mid)); c.close(); },
++    });
++    const r = await readJsonBody(new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit));
++    expect(r).toEqual({ ok: true, value: { m: "مرحبا" } });
++  });
++
++  it("declared Content-Length over the cap: refused WITHOUT reading a single byte", async () => {
++    let pulled = 0;
++    const body = new ReadableStream<Uint8Array>(
++      { pull(c) { pulled++; c.enqueue(new Uint8Array(100)); } },
++      { highWaterMark: 0 }
++    );
++    const r = await readJsonBody(
++      new Request("http://x/", { method: "POST", body, headers: { "content-length": "5000" }, duplex: "half" } as RequestInit),
++      1000
++    );
++    expect(r).toEqual({ ok: false, tooLarge: true });
++    expect(pulled).toBe(0);
++  });
++
++  it("no Content-Length (chunked): stops reading right after the cap, long before the end of a huge body", async () => {
++    let pulled = 0;
++    const body = new ReadableStream<Uint8Array>(
++      { pull(c) { pulled++; c.enqueue(new Uint8Array(1000).fill(97)); if (pulled >= 5000) c.close(); } },
++      { highWaterMark: 0 }
++    );
++    const r = await readJsonBody(
++      new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit),
++      10_000
++    );
++    expect(r).toEqual({ ok: false, tooLarge: true });
++    expect(pulled).toBeLessThan(20); // ~11 chunks cross the cap; 5000 would be the whole body
++  });
++
++  it("a body that dies mid-stream -> { ok:false } (400), never a thrown 500", async () => {
++    const body = new ReadableStream<Uint8Array>({
++      start(c) { c.enqueue(new TextEncoder().encode('{"a":')); },
++      pull(c) { c.error(new Error("socket reset")); },
++    });
++    const r = await readJsonBody(new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit));
++    expect(r).toEqual({ ok: false });
++  });
++});
++
++describe("the real routes: 413 { error: 'Request body too large' } with the CORS header", () => {
++  let env: Env;
++  beforeEach(() => {
++    env = { LOCK: makeLockNamespace() };
++    process.env.RAHEEM_WHATSAPP_NUMBER = "+15559998888";
++    process.env.ALLOWED_ORIGIN = ORIGIN;
++  });
++  afterEach(() => { delete process.env.ALLOWED_ORIGIN; delete process.env.RAHEEM_WHATSAPP_NUMBER; });
++
++  const big = jsonOfSize(MAX_JSON_BODY_BYTES + 1);
++  const hit = (path: string, body: string) =>
++    app.request(path, { method: "POST", headers: { "Content-Type": "application/json", Origin: ORIGIN }, body }, env);
++
++  it.each(["/chat", "/complete-setup"])("%s: body one byte over 4.5mb -> 413", async (path) => {
++    const res = await hit(path, big);
++    expect(res.status).toBe(413);
++    expect(await res.json()).toEqual({ error: "Request body too large" });
++    expect(res.headers.get("access-control-allow-origin")).toBe(ORIGIN);
++  });
++
++  it.each(["/chat", "/complete-setup"])("%s: malformed JSON is still a 400, not a 413", async (path) => {
++    const res = await hit(path, "{nope");
++    expect(res.status).toBe(400);
++    expect(await res.json()).toEqual({ error: "Invalid request" });
++  });
++});
+diff --git a/tests/workerApp.test.ts b/tests/workerApp.test.ts
+index 1fc25c3..dda9c01 100644
+--- a/tests/workerApp.test.ts
++++ b/tests/workerApp.test.ts
+@@ -50,6 +50,12 @@ describe("Worker app — /complete-setup transport behavior", () => {
+     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+   });
+ 
++  it("ALLOWED_ORIGIN is read per request, not at import time (replaces the old applyCors test)", async () => {
++    process.env.ALLOWED_ORIGIN = "https://late.example";
++    const res = await post("{}", { Origin: "https://late.example" });
++    expect(res.headers.get("access-control-allow-origin")).toBe("https://late.example");
++  });
++
+   it("non-POST: 405 JSON, like the Express version", async () => {
+     const res = await app.request("/complete-setup", { method: "GET" }, env);
+     expect(res.status).toBe(405);
+diff --git a/tsconfig.build.json b/tsconfig.build.json
+deleted file mode 100644
+index a4db951..0000000
+--- a/tsconfig.build.json
++++ /dev/null
+@@ -1,10 +0,0 @@
+-{
+-  "extends": "./tsconfig.json",
+-  "compilerOptions": {
+-    "module": "CommonJS",
+-    "moduleResolution": "Node",
+-    "noEmit": false,
+-    "outDir": "dist"
+-  },
+-  "include": ["api/**/*.ts", "lib/**/*.ts", "server.ts"]
+-}
+diff --git a/tsconfig.json b/tsconfig.json
+index d032a15..d312928 100644
+--- a/tsconfig.json
++++ b/tsconfig.json
+@@ -11,11 +11,7 @@
+     "resolveJsonModule": true,
+     "noEmit": true
+   },
+-  // server.ts (the Express/Termux entry point) is deliberately NOT
+-  // compiled on the `workers` branch: it imports api/ handlers whose
+-  // signatures are now Hono's. It stays byte-for-byte untouched here,
+-  // frozen, and keeps running from `main`; Stage 7 deletes it.
+-  // src/ is type-checked by tsconfig.workers.json (Workers globals),
+-  // and anything under src/ that tests import is checked here too.
++  // src/ is type-checked by tsconfig.workers.json (Workers globals);
++  // anything under src/ that tests import is checked here too.
+   "include": ["api/**/*.ts", "lib/**/*.ts", "tests/**/*.ts"]
+ }
+diff --git a/wrangler.jsonc b/wrangler.jsonc
+index ba78b60..1f2ccff 100644
+--- a/wrangler.jsonc
++++ b/wrangler.jsonc
+@@ -22,10 +22,22 @@
+   // enforces it). The Free plan allows 5 Cron Triggers per ACCOUNT (not
+   // per Worker) — this Worker uses 2, so other Workers on the account
+   // share the remaining 3.
+-  "triggers": { "crons": ["*/15 * * * *", "*/20 * * * *"]}
++  "triggers": { "crons": ["*/15 * * * *", "*/20 * * * *"] },
+ 
+-  //
+-  // Stage 7 adds "vars": { ... } for the non-secret env vars, and every
+-  // secret gets set separately via `wrangler secret put <NAME>` — never
+-  // written into this file.
++  // Stage 7: plain env vars — ONLY the non-personal ones, set to the same
++  // values the code already defaults to, so deploying this changes no
++  // behavior. Everything else is a secret, never written into this file
++  // or into git: the credentials AND the values specific to Raheem
++  // (ALLOWED_ORIGIN, SUPABASE_URL, RAHEEM_NOTIFY_EMAIL,
++  // RAHEEM_WHATSAPP_NUMBER, RESEND_FROM_EMAIL). See secrets.example.json
++  // and the README's "Deploying" section. `wrangler dev` reads .dev.vars,
++  // which overrides these locally.
++  // SED_SH_API_KEY and OPENROUTER_API_BASE are optional: left unset, PDF
++  // malware scanning is skipped / OpenRouter is called directly.
++  "vars": {
++    "AVA_CONVERSATION_MODEL": "openai/gpt-4o-mini",
++    "DEFAULT_AUTO_AI_MODEL": "openai/gpt-4o-mini",
++    "MAX_PDF_SIZE_BYTES": "10485760",
++    "SUPABASE_PDF_BUCKET": "signup-pdfs"
++  }
+ }

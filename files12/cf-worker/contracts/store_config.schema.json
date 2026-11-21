@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boltane.example/contracts/store_config.schema.json",
+  "title": "Boltane store config (V2, migration 001)",
+  "description": "The six per-store settings added to the stores table. Shared by Ava, the dashboard and the admin bot. Keys that are absent keep the database default. Other keys of a stores row are not covered here.",
+  "type": "object",
+  "properties": {
+    "features": {
+      "description": "Per-store flag overrides: flag name -> true/false. Names must be registered in core/flags.py.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "type": "boolean" }
+    },
+    "timezone": {
+      "description": "IANA name such as Asia/Damascus, or UTC. null = not configured (no open/closed claims).",
+      "type": ["string", "null"],
+      "maxLength": 64,
+      "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+)+)$"
+    },
+    "business_hours": {
+      "description": "null = not configured. Otherwise all seven days; [] = closed all day; a close earlier than its open means past midnight; 24:00 is allowed as a close only.",
+      "type": ["object", "null"],
+      "required": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+      "additionalProperties": false,
+      "properties": {
+        "mon": { "$ref": "#/$defs/day" },
+        "tue": { "$ref": "#/$defs/day" },
+        "wed": { "$ref": "#/$defs/day" },
+        "thu": { "$ref": "#/$defs/day" },
+        "fri": { "$ref": "#/$defs/day" },
+        "sat": { "$ref": "#/$defs/day" },
+        "sun": { "$ref": "#/$defs/day" }
+      }
+    },
+    "default_language": {
+      "description": "Language of customer-facing system messages.",
+      "enum": ["ar", "en"]
+    },
+    "billing_anchor": {
+      "description": "Date the monthly usage cycle is counted from. null = use the store's created_at.",
+      "type": ["string", "null"],
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "owner_phone": {
+      "description": "The owner's WhatsApp number, digits only, no plus sign.",
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{6,15}$"
+    }
+  },
+  "$defs": {
+    "day": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "prefixItems": [
+          { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+          { "type": "string", "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$" }
+        ],
+        "items": false
+      }
+    }
+  }
+}

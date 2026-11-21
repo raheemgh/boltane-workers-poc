@@ -1,0 +1,249 @@
+{
+  "rows": [
+    {
+      "name": "precondition: stores table exists (apply stores_table.sql first)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clean slate: rollbacks/001_core_schema.sql runs without error",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "first apply: migrations/001_core_schema.sql runs without error",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "after apply: the six tables exist",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "after apply: row level security is on for all six",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "after apply: no policies (service key only)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "after apply: store_id on every table",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "after apply: no timestamp without time zone",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "after apply: stores has the six new columns, typed as specified",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "second apply: migrations/001_core_schema.sql runs without error",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "second apply changed nothing (columns, constraints, indexes)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "rejected: inbound_events: same (store, wamid) twice",
+      "ok": true,
+      "detail": "expected 23505 inbound_events_store_wamid_key; got state='23505' psql:<stdin>:9: ERROR:  23505: duplicate key value violates unique constraint \"inbound_events_store_wamid_key\"\nDETAIL:  Key (store_id, wamid)=(00000000-0000-4000-8000-0000000000a1, wamid.base) already"
+    },
+    {
+      "name": "rejected: inbound_events: a message with no identity",
+      "ok": true,
+      "detail": "expected 23514 inbound_events_identity_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"inbound_events\" violates check constraint \"inbound_events_identity_check\"\nDETAIL:  Failing row contains (97a03920-9bf0-475e-886d-237d6261fb9a, 0000"
+    },
+    {
+      "name": "rejected: inbound_events: unknown status",
+      "ok": true,
+      "detail": "expected 23514 inbound_events_status_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"inbound_events\" violates check constraint \"inbound_events_status_check\"\nDETAIL:  Failing row contains (79da06cc-d273-4a6f-960e-0f96760a7a06, 000000"
+    },
+    {
+      "name": "rejected: inbound_events: event must be a JSON object",
+      "ok": true,
+      "detail": "expected 23514 inbound_events_event_object_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"inbound_events\" violates check constraint \"inbound_events_event_object_check\"\nDETAIL:  Failing row contains (f3fa2578-cb35-4c88-91b7-b4f44254d4cb, "
+    },
+    {
+      "name": "rejected: wa_customers: no phone and no bsuid",
+      "ok": true,
+      "detail": "expected 23514 wa_customers_identity_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"wa_customers\" violates check constraint \"wa_customers_identity_check\"\nDETAIL:  Failing row contains (63b6f7b7-a3eb-4066-99cc-91d39d168e9a, 00000000"
+    },
+    {
+      "name": "rejected: wa_customers: phone with a plus sign",
+      "ok": true,
+      "detail": "expected 23514 wa_customers_phone_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"wa_customers\" violates check constraint \"wa_customers_phone_check\"\nDETAIL:  Failing row contains (210fcf61-4069-4eb3-9f4b-4b90527dc636, 00000000-00"
+    },
+    {
+      "name": "rejected: wa_customers: same phone twice in one store",
+      "ok": true,
+      "detail": "expected 23505 wa_customers_store_phone_uidx; got state='23505' psql:<stdin>:9: ERROR:  23505: duplicate key value violates unique constraint \"wa_customers_store_phone_uidx\"\nDETAIL:  Key (store_id, phone)=(00000000-0000-4000-8000-0000000000a1, 963999000111) alread"
+    },
+    {
+      "name": "rejected: chat_sessions: negative counter",
+      "ok": true,
+      "detail": "expected 23514 chat_sessions_counters_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"chat_sessions\" violates check constraint \"chat_sessions_counters_check\"\nDETAIL:  Failing row contains (1456b33c-e5f7-47e3-bd37-69e2157bed9c, 000000"
+    },
+    {
+      "name": "rejected: chat_sessions: unknown store",
+      "ok": true,
+      "detail": "expected 23503 chat_sessions_store_id_fkey; got state='23503' psql:<stdin>:9: ERROR:  23503: insert or update on table \"chat_sessions\" violates foreign key constraint \"chat_sessions_store_id_fkey\"\nDETAIL:  Key (store_id)=(00000000-0000-4000-8000-00000000dead) is"
+    },
+    {
+      "name": "rejected: message_log: unknown direction",
+      "ok": true,
+      "detail": "expected 23514 message_log_direction_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"message_log\" violates check constraint \"message_log_direction_check\"\nDETAIL:  Failing row contains (1, 00000000-0000-4000-8000-0000000000a1, 000000"
+    },
+    {
+      "name": "rejected: message_log: same (store, direction, wamid) twice",
+      "ok": true,
+      "detail": "expected 23505 message_log_wamid_uidx; got state='23505' psql:<stdin>:9: ERROR:  23505: duplicate key value violates unique constraint \"message_log_wamid_uidx\"\nDETAIL:  Key (store_id, direction, wamid)=(00000000-0000-4000-8000-0000000000a1, in, m1) already "
+    },
+    {
+      "name": "rejected: usage_events: same (inbound event, kind) twice",
+      "ok": true,
+      "detail": "expected 23505 usage_events_inbound_kind_uidx; got state='23505' psql:<stdin>:9: ERROR:  23505: duplicate key value violates unique constraint \"usage_events_inbound_kind_uidx\"\nDETAIL:  Key (inbound_event_id, kind)=(00000000-0000-4000-8000-0000000000e1, reply) alrea"
+    },
+    {
+      "name": "rejected: usage_events: negative tokens",
+      "ok": true,
+      "detail": "expected 23514 usage_events_nonneg_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"usage_events\" violates check constraint \"usage_events_nonneg_check\"\nDETAIL:  Failing row contains (3, 00000000-0000-4000-8000-0000000000a1, null, n"
+    },
+    {
+      "name": "rejected: admin_alerts: two open alerts with one fingerprint",
+      "ok": true,
+      "detail": "expected 23505 admin_alerts_open_fingerprint_uidx; got state='23505' psql:<stdin>:9: ERROR:  23505: duplicate key value violates unique constraint \"admin_alerts_open_fingerprint_uidx\"\nDETAIL:  Key (fingerprint)=(fp1) already exists.\nSCHEMA NAME:  public\nTABLE NAME:  ad"
+    },
+    {
+      "name": "rejected: admin_alerts: unknown severity",
+      "ok": true,
+      "detail": "expected 23514 admin_alerts_severity_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"admin_alerts\" violates check constraint \"admin_alerts_severity_check\"\nDETAIL:  Failing row contains (3, null, loud, X, fp2, null, 1, 2026-11-21 21:"
+    },
+    {
+      "name": "rejected: stores: default_language fr",
+      "ok": true,
+      "detail": "expected 23514 stores_default_language_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"stores\" violates check constraint \"stores_default_language_check\"\nDETAIL:  Failing row contains (00000000-0000-4000-8000-0000000000a1, v2probe_a, p"
+    },
+    {
+      "name": "rejected: stores: features must be an object",
+      "ok": true,
+      "detail": "expected 23514 stores_features_object_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"stores\" violates check constraint \"stores_features_object_check\"\nDETAIL:  Failing row contains (00000000-0000-4000-8000-0000000000a1, v2probe_a, pr"
+    },
+    {
+      "name": "rejected: stores: business_hours must be an object",
+      "ok": true,
+      "detail": "expected 23514 stores_business_hours_object_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"stores\" violates check constraint \"stores_business_hours_object_check\"\nDETAIL:  Failing row contains (00000000-0000-4000-8000-0000000000a1, v2probe"
+    },
+    {
+      "name": "rejected: stores: owner_phone with a plus sign",
+      "ok": true,
+      "detail": "expected 23514 stores_owner_phone_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"stores\" violates check constraint \"stores_owner_phone_check\"\nDETAIL:  Failing row contains (00000000-0000-4000-8000-0000000000a1, v2probe_a, probe "
+    },
+    {
+      "name": "rejected: stores: timezone without a region",
+      "ok": true,
+      "detail": "expected 23514 stores_timezone_check; got state='23514' psql:<stdin>:9: ERROR:  23514: new row for relation \"stores\" violates check constraint \"stores_timezone_check\"\nDETAIL:  Failing row contains (00000000-0000-4000-8000-0000000000a1, v2probe_a, probe A, "
+    },
+    {
+      "name": "accepted: wa_customers: the same phone is fine in two different stores",
+      "ok": true,
+      "detail": "expected ['2']; got ['2'] "
+    },
+    {
+      "name": "accepted: admin_alerts: a resolved fingerprint can be opened again",
+      "ok": true,
+      "detail": "expected ['2']; got ['2'] "
+    },
+    {
+      "name": "accepted: message_log: rows with no wamid never collide",
+      "ok": true,
+      "detail": "expected ['2']; got ['2'] "
+    },
+    {
+      "name": "accepted: inbox dedupe pattern: insert ... on conflict do nothing returns 1 row, then 0",
+      "ok": true,
+      "detail": "expected ['1', '0']; got ['1', '0'] "
+    },
+    {
+      "name": "accepted: customer upsert pattern: on conflict (store_id, phone) where phone is not null",
+      "ok": true,
+      "detail": "expected ['1']; got ['1'] "
+    },
+    {
+      "name": "accepted: deleting a store removes every V2 row of that store",
+      "ok": true,
+      "detail": "expected ['0:0:0:0:0:0']; got ['0:0:0:0:0:0'] "
+    },
+    {
+      "name": "probes left no rows behind",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "rollback: rollbacks/001_core_schema.sql runs without error",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "rollback: tables and new columns are gone",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "rollback: V1 stores columns unchanged",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "rollback: V1 stores rows unchanged",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final apply: migrations/001_core_schema.sql runs without error",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final state: the six tables exist",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final state: row level security is on for all six",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final state: no policies (service key only)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final state: store_id on every table",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final state: no timestamp without time zone",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final state: stores has the six new columns, typed as specified",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
