@@ -1,0 +1,51 @@
+{
+ "_source": [
+  "https://developers.secure.facebook.com/docs/whatsapp/api/webhooks/inbound"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "meta-doc",
+ "_note": "The location object exactly as Meta documents it (older reference page; same object in Cloud API), in a Cloud API envelope.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "Kerry Fisher"
+         },
+         "wa_id": "16315551234"
+        }
+       ],
+       "messages": [
+        {
+         "from": "16315551234",
+         "id": "wamid.LOC1",
+         "timestamp": "1521497875",
+         "type": "location",
+         "location": {
+          "address": "Main Street Beach, Santa Cruz, CA",
+          "latitude": 38.9806263495,
+          "longitude": -131.9428612257,
+          "name": "Main Street Beach",
+          "url": "https://foursquare.com/v/4d7031d35b5df7744"
+         }
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}

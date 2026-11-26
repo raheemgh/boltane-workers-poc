@@ -43,8 +43,9 @@ def pack(files: dict[str, bytes]) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def render(stage: str, name: str, blob: str, template_text: str) -> str:
-    """The installer source: new header, then the template body with the payload filled in."""
+def render(stage: str, name: str, blob: str, template_text: str, expected_old: dict[str, str] | None = None) -> str:
+    """The installer source: new header, then the template body with the payload (and, if given, the
+    old-file fingerprints a replacement may overwrite) filled in."""
     tree = ast.parse(template_text)
     body = template_text.splitlines()[tree.body[0].end_lineno:]
     header = [
@@ -62,7 +63,25 @@ def render(stage: str, name: str, blob: str, template_text: str) -> str:
     wrapped = "\n".join(f'    "{blob[i:i + WRAP]}"' for i in range(0, len(blob), WRAP))
     text = "\n".join([*header, *body])
     text = text.replace('STAGE = ""  # @@STAGE@@', f'STAGE = "{stage}"')
-    return text.replace('PAYLOAD = ""  # @@PAYLOAD@@', f"PAYLOAD = (\n{wrapped}\n)") + "\n"
+    text = text.replace('PAYLOAD = ""  # @@PAYLOAD@@', f"PAYLOAD = (\n{wrapped}\n)")
+    if expected_old:
+        marker = "EXPECTED_OLD: dict[str, str] = {}  # @@EXPECTED_OLD@@"
+        if marker not in text:
+            raise ValueError("the template has no EXPECTED_OLD slot")
+        text = text.replace(marker, f"EXPECTED_OLD: dict[str, str] = {dict(sorted(expected_old.items()))!r}")
+    return text + "\n"
+
+
+def parse_replace(items: list[str], files: dict[str, bytes]) -> dict[str, str] | None:
+    """{path: sha prefix} from PATH=SHA12 items, or None (after saying why) if one is wrong."""
+    out = {}
+    for item in items:
+        path, _, sha = item.partition("=")
+        if path not in files or not 6 <= len(sha) <= 64 or any(c not in "0123456789abcdef" for c in sha):
+            print(f"bad --replace-old {item!r}: the path must be in the tree and the sha lowercase hex (6-64)")
+            return None
+        out[path] = sha
+    return out
 
 
 def main(argv=None) -> int:
@@ -71,12 +90,17 @@ def main(argv=None) -> int:
     parser.add_argument("--src", type=Path, required=True, help="staged tree (cf-worker layout)")
     parser.add_argument("--out", type=Path, required=True, help="install_v2_<nn>.py to write")
     parser.add_argument("--exclude", nargs="*", default=[], help="relative paths to leave out")
+    parser.add_argument("--replace-old", nargs="*", default=[], metavar="PATH=SHA12",
+                        help="files that may replace the one on disk if it has this sha256 prefix")
     args = parser.parse_args(argv)
     files = collect(args.src, set(args.exclude))
     if not files:
         print("nothing to pack")
         return 2
-    text = render(args.stage, args.out.stem, pack(files), TEMPLATE.read_text(encoding="utf-8"))
+    expected_old = parse_replace(args.replace_old, files)
+    if expected_old is None:
+        return 2
+    text = render(args.stage, args.out.stem, pack(files), TEMPLATE.read_text(encoding="utf-8"), expected_old)
     args.out.write_text(text, encoding="utf-8")
     print(f"built {args.out} ({len(files)} files, {len(text)} bytes)")
     return 0

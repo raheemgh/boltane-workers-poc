@@ -1,0 +1,51 @@
+{
+ "_source": [
+  "https://developers.secure.facebook.com/docs/whatsapp/api/webhooks/inbound",
+  "internal: cf-worker/test_stage6_meta_sim.py (sha256 c99d7eee8e7c): builders modelled on Meta's published shapes"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "simulator-only",
+ "_note": "Image with a caption (simulator B1; media fields id, mime_type, sha256, caption as in Meta's older reference).",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "Sim"
+         },
+         "wa_id": "963999000111"
+        }
+       ],
+       "messages": [
+        {
+         "from": "963999000111",
+         "id": "wamid.IMG1",
+         "timestamp": "1749416383",
+         "type": "image",
+         "image": {
+          "caption": "شو رأيك بهالصورة؟",
+          "mime_type": "image/jpeg",
+          "sha256": "abc",
+          "id": "MEDIA1"
+         }
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}

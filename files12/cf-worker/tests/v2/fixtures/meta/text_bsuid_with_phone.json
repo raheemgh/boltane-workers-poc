@@ -1,0 +1,49 @@
+{
+ "_source": [
+  "https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "meta-doc",
+ "_note": "Default state at launch: no username, so phone and BSUID both present (webhook-testing scenario 1). Assembled from the field list.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "Pablo M."
+         },
+         "wa_id": "16505551234",
+         "user_id": "US.13491208655302741918"
+        }
+       ],
+       "messages": [
+        {
+         "id": "wamid.TXT2",
+         "timestamp": "1749416383",
+         "type": "text",
+         "text": {
+          "body": "Hello, is the shop open?"
+         },
+         "from": "16505551234",
+         "from_user_id": "US.13491208655302741918"
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}

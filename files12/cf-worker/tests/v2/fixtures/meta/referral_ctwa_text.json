@@ -1,0 +1,56 @@
+{
+ "_source": [
+  "https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids",
+  "https://developers.secure.facebook.com/docs/whatsapp/api/webhooks/inbound"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "simulator-only",
+ "_note": "A text that opened a chat from a click-to-WhatsApp ad: referral fields per Meta's components page (source_type, source_id, source_url); ctwa_clid per Meta's CTWA docs, not re-fetched.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "Sim"
+         },
+         "wa_id": "963999000111"
+        }
+       ],
+       "messages": [
+        {
+         "id": "wamid.REF1",
+         "timestamp": "1749416383",
+         "type": "text",
+         "text": {
+          "body": "Is this offer still on?"
+         },
+         "from": "963999000111",
+         "referral": {
+          "source_url": "https://fb.me/abc",
+          "source_id": "120200000000000",
+          "source_type": "ad",
+          "headline": "Summer offer",
+          "body": "Ask us",
+          "ctwa_clid": "AR_fake_click_id_0000000000"
+         }
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}

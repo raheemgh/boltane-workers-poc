@@ -1,0 +1,57 @@
+{
+ "_source": [
+  "https://developers.facebook.com/community/threads/3423432361161832/",
+  "internal: cf-worker/test_stage6_meta_sim.py (sha256 c99d7eee8e7c): builders modelled on Meta's published shapes"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "meta-doc",
+ "_note": "type unsupported with error 131051, seen for images sent from WhatsApp Web (community thread, July 2026). Ids are invented.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "Test"
+         },
+         "wa_id": "59170000001",
+         "user_id": "BO.10000000000000000001"
+        }
+       ],
+       "messages": [
+        {
+         "from": "59170000001",
+         "from_user_id": "BO.10000000000000000001",
+         "id": "wamid.UNS1",
+         "timestamp": "1784898266",
+         "type": "unsupported",
+         "errors": [
+          {
+           "code": 131051,
+           "title": "Message type is not currently supported",
+           "message": "Message type is not currently supported",
+           "error_data": {
+            "details": "Message type is not currently supported"
+           }
+          }
+         ]
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}

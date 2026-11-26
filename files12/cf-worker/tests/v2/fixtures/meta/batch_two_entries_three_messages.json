@@ -1,0 +1,91 @@
+{
+ "_source": [
+  "internal: cf-worker/test_stage6_meta_sim.py (sha256 c99d7eee8e7c): builders modelled on Meta's published shapes",
+  "https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "simulator-only",
+ "_note": "Two entries, the first with two messages: V1 answers only the first of the three (simulator C10/C11). Assembled by us.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "field": "messages",
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "A"
+         },
+         "wa_id": "16505551234"
+        }
+       ],
+       "messages": [
+        {
+         "id": "wamid.B1",
+         "timestamp": "1749416383",
+         "type": "text",
+         "text": {
+          "body": "one"
+         },
+         "from": "16505551234"
+        },
+        {
+         "id": "wamid.B2",
+         "timestamp": "1749416383",
+         "type": "text",
+         "text": {
+          "body": "two"
+         },
+         "from": "16505551234"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "field": "messages",
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "B"
+         },
+         "wa_id": "963999000222"
+        }
+       ],
+       "messages": [
+        {
+         "id": "wamid.B3",
+         "timestamp": "1749416383",
+         "type": "text",
+         "text": {
+          "body": "three"
+         },
+         "from": "963999000222"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

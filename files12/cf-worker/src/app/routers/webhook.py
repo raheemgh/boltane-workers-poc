@@ -60,7 +60,7 @@ import hmac
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import get_settings
 from app.services.ai_client import call_ai
@@ -73,6 +73,11 @@ from app.services.supabase_client import (
 )
 from app.services.token_limits import MAX_INPUT_TOKENS_PER_MESSAGE, estimate_tokens
 from app.worker_ctx import get_worker_ctx
+
+try:  # V2-02B: the V2 selector. If it cannot load, V1 runs exactly as it did before.
+    from app.v2.pipeline.entry import route_delivery as _v2_route_delivery
+except Exception:  # V2 must never be able to stop V1 from starting
+    _v2_route_delivery = None
 
 logger = logging.getLogger("boltane.webhook")
 
@@ -188,7 +193,9 @@ def _verify_meta_signature(raw_body: bytes, signature_header: str | None) -> boo
 
 
 @router.post("/webhook", response_model=None)
-async def receive_message(request: Request, background_tasks: BackgroundTasks) -> dict | PlainTextResponse:
+async def receive_message(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict | PlainTextResponse | JSONResponse:
     """
     Receives a WhatsApp message payload from Meta.
 
@@ -207,6 +214,20 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
         return PlainTextResponse(content="invalid signature", status_code=403)
 
     payload = await request.json()
+
+    # V2-02B selector. With every V2 flag off (the default) it answers None at once and V1 carries on below,
+    # unchanged. When V2 takes the delivery it has already stored it, and V1 only passes its answer on.
+    # It runs before the payload is logged below, so a delivery that V2 takes never reaches that log line.
+    if _v2_route_delivery is not None:
+        try:
+            verdict = await _v2_route_delivery(payload, request.scope.get("env"), get_worker_ctx(request.scope))
+        except Exception:
+            logger.exception("V2 selector failed; continuing with V1")
+            verdict = None
+        if verdict is not None:
+            logger.info("%s", verdict.note)
+            return JSONResponse(content=verdict.body, status_code=verdict.status)
+
     logger.info("received webhook payload: %s", payload)
 
     # Stage 6 — the one deliberate difference from Render's receive_message.

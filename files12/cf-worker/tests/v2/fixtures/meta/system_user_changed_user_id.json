@@ -1,0 +1,42 @@
+{
+ "_source": [
+  "https://developers.secure.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/messages/system/",
+  "https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "meta-doc",
+ "_note": "System message: BSUID changed and no phone can be shared (from and wa_id omitted). Assembled from Meta's field list and example ids.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "messages": [
+        {
+         "id": "wamid.SYS2",
+         "timestamp": "1750040000",
+         "type": "system",
+         "system": {
+          "body": "User changed from US.10230984751029384756 to US.13491208655302741918",
+          "user_id": "US.13491208655302741918",
+          "previous_user_id": "US.10230984751029384756",
+          "type": "user_changed_user_id"
+         }
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}

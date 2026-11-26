@@ -19,6 +19,8 @@ from pathlib import Path
 
 STAGE = ""  # @@STAGE@@
 PAYLOAD = ""  # @@PAYLOAD@@
+# Payload keys that may replace a file already on disk, with the sha256 prefix that file must have now.
+EXPECTED_OLD: dict[str, str] = {}  # @@EXPECTED_OLD@@
 ROOT_PREFIX = "@root/"
 CHECKER = "tooling/conventions/check_conventions.py"
 CFW_TOKEN = b"@CFW@"
@@ -58,6 +60,16 @@ def target_path(key: str, root: Path, git_root: Path | None) -> Path | None:
     return root / key
 
 
+def sha12(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:12]
+
+
+def replaceable(key: str, path: Path) -> bool:
+    """True if `key` may replace the file on disk: it is listed in EXPECTED_OLD and has exactly that content."""
+    expected = EXPECTED_OLD.get(key)
+    return bool(expected) and path.is_file() and sha12(path.read_bytes()).startswith(expected)
+
+
 def plan(files, root, git_root):
     """Split the payload into (to_write, identical, conflicts, unplaced)."""
     to_write, identical, conflicts, unplaced = [], [], [], []
@@ -69,43 +81,81 @@ def plan(files, root, git_root):
             to_write.append((key, path, data))
         elif path.is_file() and path.read_bytes() == data:
             identical.append(key)
+        elif replaceable(key, path):
+            to_write.append((key, path, data))
         else:
             conflicts.append(key)
     return to_write, identical, conflicts, unplaced
 
 
-def write_all(to_write) -> str | None:
-    """Create every file or none: on failure the files created so far are removed."""
-    created = []
+def write_file(path: Path, data: bytes, replace: bool) -> None:
+    """Create `path` (it must not exist), or replace it through a temporary file."""
+    if not replace:
+        with path.open("xb") as handle:
+            handle.write(data)
+        return
+    temp = path.with_name(path.name + ".installing")
     try:
-        for _key, path, data in to_write:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("xb") as handle:
-                handle.write(data)
-            created.append(path)
-    except OSError as exc:
-        for path in created:
+        temp.write_bytes(data)
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def undo(done) -> None:
+    """Remove the files created and restore the files replaced, newest first."""
+    for path, previous in reversed(done):
+        if previous is None:
             path.unlink(missing_ok=True)
-        return f"write failed ({exc}); {len(created)} file(s) rolled back"
+        else:
+            path.write_bytes(previous)
+
+
+def write_all(to_write) -> str | None:
+    """Create or replace every file, or none: on failure the created files are removed and the replaced restored."""
+    done = []  # (path, the bytes it had before, or None if it was created)
+    try:
+        for key, path, data in to_write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            previous = path.read_bytes() if replaceable(key, path) else None
+            write_file(path, data, previous is not None)
+            done.append((path, previous))
+    except OSError as exc:
+        undo(done)
+        return f"write failed ({exc}); {len(done)} file(s) rolled back"
     return None
+
+
+def report_problems(conflicts, unplaced, root, out) -> None:
+    for key in conflicts:
+        hint = f" (the old version must have sha256 {EXPECTED_OLD[key]})" if key in EXPECTED_OLD else ""
+        out(f"CONFLICT {key}: exists and differs{hint}; nothing was written")
+    for key in unplaced:
+        out(f"UNPLACED {key}: needs a git root (.git) above {root}; nothing was written")
+
+
+def report_written(to_write, before, identical, out) -> None:
+    for key, _path, data in to_write:
+        if key in before:
+            out(f"REPLACED {key} (sha256 {before[key]} -> {sha12(data)}; git checkout restores the old file)")
+        else:
+            out(f"WROTE {key} ({len(data)} bytes, sha256 {sha12(data)})")
+    extra = f" replaced={len(before)}" if before else ""
+    out(f"SUMMARY written={len(to_write)} identical={identical} conflicts=0{extra}")
 
 
 def install(files, root, git_root, out=print) -> int:
     """Install the payload; returns 0 on success, 1 if nothing was written."""
     to_write, identical, conflicts, unplaced = plan(files, root, git_root)
-    for key in conflicts:
-        out(f"CONFLICT {key}: exists and differs; nothing was written")
-    for key in unplaced:
-        out(f"UNPLACED {key}: needs a git root (.git) above {root}; nothing was written")
+    report_problems(conflicts, unplaced, root, out)
     if conflicts or unplaced:
         return 1
+    before = {key: sha12(path.read_bytes()) for key, path, _data in to_write if path.is_file()}
     error = write_all(to_write)
     if error:
         out(error)
         return 1
-    for key, _path, data in to_write:
-        out(f"WROTE {key} ({len(data)} bytes, sha256 {hashlib.sha256(data).hexdigest()[:12]})")
-    out(f"SUMMARY written={len(to_write)} identical={len(identical)} conflicts=0")
+    report_written(to_write, before, len(identical), out)
     return 0
 
 

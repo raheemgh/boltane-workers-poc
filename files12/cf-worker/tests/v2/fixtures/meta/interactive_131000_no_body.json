@@ -1,0 +1,60 @@
+{
+ "_source": [
+  "https://developers.facebook.com/community/threads/3423432361161832/"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "meta-doc",
+ "_note": "A tapped button from WhatsApp Web arrives as type interactive with NO interactive object and error 131000 (community thread, July 2026). Ids are invented.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "Test"
+         },
+         "wa_id": "59170000001",
+         "user_id": "BO.10000000000000000001"
+        }
+       ],
+       "messages": [
+        {
+         "context": {
+          "from": "15550783881",
+          "id": "wamid.CTX1"
+         },
+         "from": "59170000001",
+         "from_user_id": "BO.10000000000000000001",
+         "id": "wamid.INT0",
+         "timestamp": "1784898266",
+         "type": "interactive",
+         "errors": [
+          {
+           "code": 131000,
+           "title": "Something went wrong",
+           "message": "Something went wrong",
+           "error_data": {
+            "details": "Unsupported webhook payload"
+           }
+          }
+         ]
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}

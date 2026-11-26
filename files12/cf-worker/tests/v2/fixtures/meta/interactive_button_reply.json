@@ -1,0 +1,55 @@
+{
+ "_source": [
+  "internal: cf-worker/test_stage6_meta_sim.py (sha256 c99d7eee8e7c): builders modelled on Meta's published shapes"
+ ],
+ "_fetched": "2026-11-23",
+ "_verified": "simulator-only",
+ "_note": "A tapped reply button (simulator scenario B7); shape not re-checked against Meta's interactive reference.",
+ "payload": {
+  "object": "whatsapp_business_account",
+  "entry": [
+   {
+    "id": "102290129340398",
+    "changes": [
+     {
+      "value": {
+       "messaging_product": "whatsapp",
+       "metadata": {
+        "display_phone_number": "15550783881",
+        "phone_number_id": "106540352242922"
+       },
+       "contacts": [
+        {
+         "profile": {
+          "name": "Sim"
+         },
+         "wa_id": "963999000111"
+        }
+       ],
+       "messages": [
+        {
+         "context": {
+          "from": "15550783881",
+          "id": "wamid.PREV"
+         },
+         "from": "963999000111",
+         "id": "wamid.INT1",
+         "timestamp": "1749416383",
+         "type": "interactive",
+         "interactive": {
+          "type": "button_reply",
+          "button_reply": {
+           "id": "btn1",
+           "title": "نعم"
+          }
+         }
+        }
+       ]
+      },
+      "field": "messages"
+     }
+    ]
+   }
+  ]
+ }
+}
